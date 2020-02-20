@@ -197,10 +197,45 @@ var payload = function(){
 
   // ===========================================================================
 
+  const process_index = () => {
+    const update_links = () => {
+      const imgsrc_regex = new RegExp('^.*/channels/(\\d+)/.*$', 'i')
+      const labels = [...document.querySelectorAll('.mediaItem > .Item > .mediaStill + .mediaBox:not([x-modified])')]
+      for (const label of labels) {
+        let labeltitle = label.querySelector(':scope > .mediaTitle')
+        if (!labeltitle) continue
+
+        let image = label.parentElement.querySelector(':scope > .mediaStill img[src]')
+        if (!image) continue
+
+        let imgsrc = image.getAttribute('src')
+        if (!imgsrc_regex.test(imgsrc)) continue
+
+        let video_id    = imgsrc.replace(imgsrc_regex, '$1')
+        let video_url   = `/watch/${video_id}`
+        let video_title = labeltitle.innerText
+
+        let anchor_style = 'text-decoration:none; color:inherit;'
+        let anchor_click = 'event.stopPropagation(); event.stopImmediatePropagation(); return true'
+        let anchor_html  = `<a target="_blank" href="${video_url}" style="${anchor_style}" onclick="${anchor_click}">${video_title}</a>`
+
+        labeltitle.innerHTML = anchor_html
+
+        label.setAttribute('x-modified', '1')
+      }
+    }
+
+    update_links()
+    setInterval(update_links, 2500)
+  }
+
+  // ===========================================================================
+
   const process_site_url = (pathname) => {
     const url_regex = {
       series: new RegExp('^/watch/([\\d]+)$', 'i'),
-      video:  new RegExp('^/watch(?:/playlist)?/[\\d]+/([\\d]+)$', 'i')
+      video:  new RegExp('^/watch(?:/playlist)?/[\\d]+/([\\d]+)$', 'i'),
+      index:  new RegExp('^/(?:shows|movies)$', 'i')
     }
 
     if (url_regex.series.test(pathname)) {
@@ -212,6 +247,11 @@ var payload = function(){
     if (url_regex.video.test(pathname)) {
       const video_id = pathname.replace(url_regex.video, '$1')
       process_video(video_id)
+      return
+    }
+
+    if (url_regex.index.test(pathname)) {
+      process_index()
       return
     }
   }
