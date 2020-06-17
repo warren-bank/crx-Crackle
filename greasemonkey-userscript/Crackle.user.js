@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      0.1.0
+// @version      0.1.1
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -20,9 +20,10 @@
 // https://www.chromium.org/developers/design-documents/user-scripts
 
 var user_options = {
-  "script_injection_delay_ms":   0,
-  "open_in_webcast_reloaded":    false,
-  "open_in_exoairplayer_sender": true
+  "script_injection_delay_ms":    0,
+  "redirect_to_webcast_reloaded": true,
+  "force_http":                   true,
+  "force_https":                  false
 }
 
 var payload = function(){
@@ -117,7 +118,7 @@ var payload = function(){
   // ===========================================================================
 
   const process_video = (video_id) => {
-    if (!window.open_in_webcast_reloaded && !window.open_in_exoairplayer_sender)
+    if (!window.redirect_to_webcast_reloaded)
       return
 
     const buf2hex = (buffer) => Array.prototype.map.call(new Uint8Array(buffer), x => ('00' + x.toString(16)).slice(-2)).join('').toUpperCase()
@@ -158,38 +159,63 @@ var payload = function(){
       }
     }
 
+    const get_referer_url = function() {
+      let referer_url
+      try {
+        referer_url = top.location.href
+      }
+      catch(e) {
+        referer_url = window.location.href
+      }
+      return referer_url
+    }
+
+    const get_webcast_reloaded_url = (hls_url, vtt_url, referer_url) => {
+      let encoded_hls_url, encoded_vtt_url, encoded_referer_url, webcast_reloaded_base, webcast_reloaded_url
+
+      encoded_hls_url       = encodeURIComponent(encodeURIComponent(btoa(hls_url)))
+      encoded_vtt_url       = vtt_url ? encodeURIComponent(encodeURIComponent(btoa(vtt_url))) : null
+      referer_url           = referer_url ? referer_url : get_referer_url()
+      encoded_referer_url   = encodeURIComponent(encodeURIComponent(btoa(referer_url)))
+
+      webcast_reloaded_base = {
+        "https": "https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html",
+        "http":  "http://webcast-reloaded.surge.sh/index.html"
+      }
+
+      webcast_reloaded_base = (window.force_http)
+                                ? webcast_reloaded_base.http
+                                : (window.force_https)
+                                   ? webcast_reloaded_base.https
+                                   : (hls_url.toLowerCase().indexOf('http:') === 0)
+                                      ? webcast_reloaded_base.http
+                                      : webcast_reloaded_base.https
+
+      webcast_reloaded_url  = webcast_reloaded_base + '#/watch/' + encoded_hls_url + (encoded_vtt_url ? ('/subtitle/' + encoded_vtt_url) : '') + '/referer/' + encoded_referer_url
+      return webcast_reloaded_url
+    }
+
+    const redirect_to_url = function(url) {
+      if (!url) return
+
+      try {
+        top.location = url
+      }
+      catch(e) {
+        window.location = url
+      }
+    }
+
     const preprocess_HLS_url = (hls_url) => {
       const embedded_advertising_qs_params = /(?:expand|ad|ad\.locationDesc|ad\.bumper|ad\.preroll|extsid|ad\.metr|euid)=[^&]*[&]?/ig
       return hls_url.replace(embedded_advertising_qs_params, '')
     }
 
     const process_HLS_url = (hls_url, vtt_url) => {
-      let encoded_hls_url, encoded_vtt_url, webcast_reloaded_base, webcast_reloaded_url
-      let encoded_referer_url, exoairplayer_base, exoairplayer_url
+      if (hls_url && window.redirect_to_webcast_reloaded) {
+        // transfer video stream
 
-      encoded_hls_url       = encodeURIComponent(encodeURIComponent(btoa(hls_url)))
-      encoded_vtt_url       = vtt_url ? encodeURIComponent(encodeURIComponent(btoa(vtt_url))) : null
-      webcast_reloaded_base = {
-        "https": "https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html",
-        "http":  "http://webcast-reloaded.surge.sh/index.html"
-      }
-      webcast_reloaded_base = (hls_url.toLowerCase().indexOf('https:') === 0)
-                                ? webcast_reloaded_base.https
-                                : webcast_reloaded_base.http
-      webcast_reloaded_url  = webcast_reloaded_base + '#/watch/' + encoded_hls_url + (encoded_vtt_url ? ('/subtitle/' + encoded_vtt_url) : '')
-
-      encoded_referer_url   = encodeURIComponent(encodeURIComponent(btoa(top.location.href)))
-      exoairplayer_base     = 'http://webcast-reloaded.surge.sh/airplay_sender.html'
-      exoairplayer_url      = exoairplayer_base  + '#/watch/' + encoded_hls_url + (encoded_vtt_url ? ('/subtitle/' + encoded_vtt_url) : '') + '/referer/' + encoded_referer_url
-
-      if (window.open_in_webcast_reloaded && webcast_reloaded_url) {
-        top.location = webcast_reloaded_url
-        return
-      }
-
-      if (window.open_in_exoairplayer_sender && exoairplayer_url) {
-        top.location = exoairplayer_url
-        return
+        redirect_to_url(get_webcast_reloaded_url(hls_url, vtt_url))
       }
     }
 
@@ -208,14 +234,20 @@ var payload = function(){
         const media = await download_json(media_detail_url, timestamp, hmac)
 
         if (media.MediaURLs && Array.isArray(media.MediaURLs) && media.MediaURLs.length) {
-          const HLS_urls = media.MediaURLs.filter(obj => ((obj.Type === 'AppleTV.m3u8') && obj.Path)).map(obj => obj.Path).map(url => (url[0] === '/') ? `https:${url}` : url)
+          const HLS_urls = [
+            ...media.MediaURLs.filter(obj => ((obj.Type === 'AppleTV.m3u8') && !obj.UseDRM && obj.Path   )).map(obj => obj.Path   ).map(url => (url[0] === '/') ? `https:${url}` : url),
+            ...media.MediaURLs.filter(obj => ((obj.Type === 'AppleTV.m3u8') &&  obj.UseDRM && obj.DRMPath)).map(obj => obj.DRMPath).map(url => (url[0] === '/') ? `https:${url}` : url)
+          ]
 
           if (HLS_urls.length) {
             let hls_url = HLS_urls[0]
             let vtt_url = null
 
             if (media.ClosedCaptionFiles && Array.isArray(media.ClosedCaptionFiles) && media.ClosedCaptionFiles.length) {
-              const VTT_urls = media.ClosedCaptionFiles.filter(obj => ((obj.Type === 'VTT') && obj.Path)).map(obj => obj.Path).map(url => (url[0] === '/') ? `https:${url}` : url)
+              const VTT_urls = [
+                ...media.ClosedCaptionFiles.filter(obj => ((obj.Type === 'VTT') && obj.Path)).map(obj => obj.Path).map(url => (url[0] === '/') ? `https:${url}` : url),
+                ...media.ClosedCaptionFiles.filter(obj => ((obj.Type === 'SRT') && obj.Path)).map(obj => obj.Path).map(url => (url[0] === '/') ? `https:${url}` : url)
+              ]
 
               if (VTT_urls.length)
                 vtt_url = VTT_urls[0]
@@ -361,8 +393,9 @@ var inject_function = function(_function){
 
 var inject_options = function(){
   var _function = `function(){
-    window.open_in_webcast_reloaded    = ${user_options['open_in_webcast_reloaded']}
-    window.open_in_exoairplayer_sender = ${user_options['open_in_exoairplayer_sender']}
+    window.redirect_to_webcast_reloaded = ${user_options['redirect_to_webcast_reloaded']}
+    window.force_http                   = ${user_options['force_http']}
+    window.force_https                  = ${user_options['force_https']}
   }`
   inject_function(_function)
 }
