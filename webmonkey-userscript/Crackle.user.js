@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      1.0.0
+// @version      1.0.1
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
 // @match        *://*.sonycrackle.com/*
 // @icon         https://www.crackle.com/config/avod/favicon/favicon.ico
-// @run-at       document-idle
+// @run-at       document-end
 // @homepage     https://github.com/warren-bank/crx-Crackle/tree/webmonkey-userscript/es5
 // @supportURL   https://github.com/warren-bank/crx-Crackle/issues
 // @downloadURL  https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/Crackle.user.js
@@ -143,11 +143,18 @@ var process_hls_url = function(hls_url, vtt_url, referer_url) {
 
 // ----------------------------------------------------------------------------- helpers
 
+var repeat_string = function(str, count) {
+  var rep = ''
+  for (var i=0; i < count; i++)
+    rep += str
+  return rep
+}
+
 var pad_zeros = function(num, len) {
   var str = num.toString()
   var pad = len - str.length
   if (pad > 0)
-    str = ('0').repeat(pad) + str
+    str = repeat_string('0', pad) + str
   return str
 }
 
@@ -219,7 +226,7 @@ var process_series = function(series_id) {
       url  = 'https://www.crackle.com/watch/' + series_id + '/' + video.Id
       info = video.Description
 
-      links.push({title, url, info})
+      links.push({title: title, url: url, info: info})
     }
 
     var html = ''
