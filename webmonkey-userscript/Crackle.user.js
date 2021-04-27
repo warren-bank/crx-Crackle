@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      1.0.1
+// @version      1.0.2
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -242,7 +242,8 @@ var process_series = function(series_id) {
       ).join("\n")
     html += "\n" + '</ul>'
 
-    document.body.innerHTML = html
+    unsafeWindow.document.body.innerHTML = html
+    unsafeWindow.document.body.style.backgroundColor = 'white'
   }
 
   var request_playlist_detail = function(series_id) {
@@ -399,7 +400,7 @@ var process_video = function(video_id) {
 var process_index = function() {
   var update_links = function() {
     var imgsrc_regex = new RegExp('^.*/channels/(\\d+)/.*$', 'i')
-    var labels = document.querySelectorAll('.mediaItem > .Item > .mediaStill + .mediaBox:not([x-modified])')
+    var labels = unsafeWindow.document.querySelectorAll('.mediaItem > .Item > .mediaStill + .mediaBox:not([x-modified])')
     var label, labeltitle, image, imgsrc, video_id, video_url, video_title, anchor_style, anchor_click, anchor_html
 
     for (var i=0; i < labels.length; i++) {
@@ -429,7 +430,7 @@ var process_index = function() {
   }
 
   update_links()
-  setInterval(update_links, 2500)
+  unsafeWindow.setInterval(update_links, 2500)
 }
 
 // ----------------------------------------------------------------------------- bootstrap
