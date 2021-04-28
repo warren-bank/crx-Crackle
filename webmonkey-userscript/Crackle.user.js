@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      3.0.2
+// @version      3.0.3
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -331,6 +331,8 @@ var extract_video_from_API_server_response = function(media) {
 
 // ============================================================================= SPA
 
+// ----------------------------------------------------------------------------- constants
+
 var strings = {
   "heading_filters":                  "Filter Channels",
   "label_type":                       "By Type:",
@@ -347,6 +349,8 @@ var strings = {
   "heading_tools":                    "Tools",
   "button_expand_all":                "Expand All",
   "button_collapse_all":              "Collapse All",
+  "button_clear_cache":               "Clear Persistent Cache",
+  "button_reload":                    "Reload",
 
   "button_download_episodes":         "List All Episodes",
   "button_download_video":            "Get Video URL",
@@ -361,6 +365,10 @@ var strings = {
     "duration_hour":                  "hour",
     "duration_hours":                 "hours",
     "duration_minutes":               "minutes"
+  },
+  "cache_units": {
+    "item":                           "item",
+    "items":                          "items"
   }
 }
 
@@ -390,13 +398,18 @@ var constants = {
   "img_urls": {
     "icon_expand":                    "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.arrow_drop_down_circle.twotone.png",
     "icon_collapse":                  "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.expand_less.round.png",
+    "icon_delete":                    "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.delete_forever.twotone.png",
+    "icon_refresh":                   "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.refresh.baseline.png",
     "base_webcast_reloaded_icons":    "https://github.com/warren-bank/crx-webcast-reloaded/raw/gh-pages/chrome_extension/2-release/popup/img/"
   },
   "base_website_url":                 "https://www.crackle.com/watch/",
   "country":                          "US",
   "language_locale":                  "en-US",
-  "epg_data_cache_storage_key":       "epg_data",
-  "epg_data_xhr_page_size":           20
+  "epg_data_xhr_page_size":           20,
+  "cache_keys": {
+    "epg_data":                       "epg_data",
+    "epg_data_count":                 "epg_data_count"
+  }
 }
 
 // ----------------------------------------------------------------------------- URL links to tools on Webcast Reloaded website
@@ -769,7 +782,9 @@ var process_filters = function(type, category, text_query) {
   }
 }
 
-var onclick_filter_button = function() {
+var onclick_filter_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
   var type       = unsafeWindow.document.getElementById(constants.dom_ids.select_type).value
   var category   = unsafeWindow.document.getElementById(constants.dom_ids.select_category).value
   var text_query = unsafeWindow.document.getElementById(constants.dom_ids.text_query).value.toLowerCase()
@@ -866,12 +881,35 @@ var process_expand_or_collapse_all_button = function(expand, exclude_filtered_ch
   }
 }
 
-var onclick_expand_all_button = function() {
+var onclick_expand_all_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
   process_expand_or_collapse_all_button(true, false)
 }
 
-var onclick_collapse_all_button = function() {
+var onclick_collapse_all_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
   process_expand_or_collapse_all_button(false, false)
+}
+
+var onclick_clear_cache_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
+  epg_data_cache.clear_persistent_storage()
+
+  // enable the reload button
+  var clear_cache_button = event.target
+  var reload_button      = clear_cache_button.nextSibling
+
+  if (reload_button instanceof HTMLButtonElement)
+    reload_button.disabled = false
+}
+
+var onclick_reload_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
+  unsafeWindow.location.reload()
 }
 
 var make_expand_all_button = function() {
@@ -892,9 +930,58 @@ var make_collapse_all_button = function() {
   return button
 }
 
+var make_clear_cache_button = function() {
+  var is_enabled = epg_data_cache.is_persistent_storage_available()
+  var item_count = epg_data_cache.get_item_count_in_persistent_storage()
+
+  var get_item_count_string = function(item_count) {
+    if (item_count > 0)
+      return ' (' + item_count + ' ' + ((item_count === 1) ? strings.cache_units.item : strings.cache_units.items) + ')'
+    else
+      return ''
+  }
+
+  var button = make_element('button')
+
+  button.innerHTML = '<img src="' + constants.img_urls.icon_delete + '" /> ' + strings.button_clear_cache + get_item_count_string(item_count)
+
+  if (is_enabled) {
+    button.addEventListener("click", onclick_clear_cache_button)
+
+    unsafeWindow.addEventListener('message', function(event) {
+      if (event.data && (typeof event.data === 'object') && (typeof event.data.new_item_count_in_persistent_storage === 'number')) {
+        var new_item_count = event.data.new_item_count_in_persistent_storage
+        var html = button.innerHTML
+
+        // update new item count
+        html = html.replace(/ \(.*$/, '') + get_item_count_string(new_item_count)
+
+        button.innerHTML = html
+      }
+    })
+  }
+  else {
+    button.disabled = true
+  }
+
+  return button
+}
+
+var make_reload_button = function() {
+  var button = make_element('button')
+
+  button.innerHTML = '<img src="' + constants.img_urls.icon_refresh + '" /> ' + strings.button_reload
+  button.addEventListener("click", onclick_reload_button)
+  button.disabled = true
+
+  return button
+}
+
 var populate_dom_tools = function() {
   var expand_all_button   = make_expand_all_button()
   var collapse_all_button = make_collapse_all_button()
+  var clear_cache_button  = make_clear_cache_button()
+  var reload_button       = make_reload_button()
   var EPG_tools           = unsafeWindow.document.getElementById(constants.dom_ids.div_tools)
   var div
 
@@ -907,6 +994,11 @@ var populate_dom_tools = function() {
   div = make_element('div')
   div.appendChild(expand_all_button)
   div.appendChild(collapse_all_button)
+  EPG_tools.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(clear_cache_button)
+  div.appendChild(reload_button)
   EPG_tools.appendChild(div)
 }
 
@@ -1360,9 +1452,9 @@ var post_process_epg_data = function() {
 // ----------------------------------------------------------------------------- EPG: data cache
 
 var epg_data_cache = {
-  data: {
-    shows: [],
-    movies: []
+  data: null,
+  initialize_data: function() {
+    epg_data_cache.data = {shows: [], movies: []}
   },
   add_raw_data: function(type, entries) {
     var old_entry, new_entry
@@ -1391,7 +1483,7 @@ var epg_data_cache = {
     try {
       if (!epg_data_cache.is_persistent_storage_available()) throw ''
 
-      var json = GM_getValue(constants.epg_data_cache_storage_key, '')
+      var json = GM_getValue(constants.cache_keys.epg_data, '')
       if (!json) throw ''
 
       var data = JSON.parse(json)
@@ -1409,7 +1501,52 @@ var epg_data_cache = {
       if (!epg_data_cache.is_persistent_storage_available()) throw ''
 
       var json = JSON.stringify(epg_data_cache.data)
-      GM_setValue(constants.epg_data_cache_storage_key, json)
+      GM_setValue(constants.cache_keys.epg_data, json)
+      return true
+    }
+    catch(error) {
+      return false
+    }
+  },
+  get_item_count_in_persistent_storage: function() {
+    try {
+      if (!epg_data_cache.is_persistent_storage_available()) throw ''
+
+      var count = GM_getValue(constants.cache_keys.epg_data_count, '')
+      if (!count) return 0
+
+      count = parseInt(count, 10)
+      if (!count || isNaN(count)) return 0
+
+      return count
+    }
+    catch(error) {
+      return -1
+    }
+  },
+  save_item_count_to_persistent_storage: function() {
+    try {
+      if (!epg_data_cache.is_persistent_storage_available()) throw ''
+
+      var count = epg_data_cache.data.shows.length + epg_data_cache.data.movies.length
+      GM_setValue(constants.cache_keys.epg_data_count, ('' + count))
+
+      // fire an event that can be used to dynamically update the DOM
+      unsafeWindow.postMessage({new_item_count_in_persistent_storage: count}, '*')
+
+      return true
+    }
+    catch(error) {
+      return false
+    }
+  },
+  clear_persistent_storage: function() {
+    try {
+      if (!epg_data_cache.is_persistent_storage_available()) throw ''
+
+      epg_data_cache.initialize_data()
+      epg_data_cache.save_data_to_persistent_storage()
+      epg_data_cache.save_item_count_to_persistent_storage()
       return true
     }
     catch(error) {
@@ -1488,6 +1625,7 @@ var populate_epg_data_cache = function(oncomplete) {
     fetch_epg_data()
   }
 
+  epg_data_cache.initialize_data()
   initiate_fetch()
 }
 
@@ -1515,6 +1653,7 @@ var populate_epg_data = function() {
   else {
     var oncomplete = function() {
       epg_data_cache.save_data_to_persistent_storage()
+      epg_data_cache.save_item_count_to_persistent_storage()
       process_epg_data_cache()
     }
 
@@ -1523,6 +1662,8 @@ var populate_epg_data = function() {
 }
 
 // ============================================================================= deep links
+
+// ----------------------------------------------------------------------------- episodes page (TV series or movie)
 
 var process_episodes_deeplink = function(show_id) {
   var display_episodes = function(show_id, episodes) {
@@ -1583,7 +1724,7 @@ var process_episodes_deeplink = function(show_id) {
   download_episodes(show_id)
 }
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------- video page
 
 var process_video_deeplink = function(video_id) {
   if (!user_options.redirect_to_webcast_reloaded)
