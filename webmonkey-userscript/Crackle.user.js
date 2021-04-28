@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      1.0.2
+// @version      2.0.0
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -20,14 +20,82 @@
 // ----------------------------------------------------------------------------- constants
 
 var user_options = {
-  "redirect_to_webcast_reloaded": true,
-  "force_http":                   true,
-  "force_https":                  false,
+  "redirect_to_webcast_reloaded":     true,
+  "force_http":                       true,
+  "force_https":                      false,
 
   // 0: silent
   // 1: more important
   // 9: less important
-  "debug_verbosity":              0
+  "debug_verbosity":                  0
+}
+
+var strings = {
+  "heading_filters":                  "Filter Channels",
+  "label_type":                       "By Type:",
+  "label_category":                   "By Category:",
+  "types": {
+    "shows":                          "Television",
+    "movies":                         "Movies"
+  },
+  "default_type":                     "Show All",
+  "default_category":                 "Show All",
+  "label_name":                       "By Name:",
+  "button_filter":                    "Apply",
+
+  "heading_tools":                    "Tools",
+  "button_expand_all":                "Expand All",
+  "button_collapse_all":              "Collapse All",
+
+  "button_download_episodes":         "List All Episodes",
+  "button_download_video":            "Get Video URL",
+  "button_start_video":               "Start Video",
+
+  "episode_labels": {
+    "title":                          "title:",
+    "summary":                        "summary:",
+    "time_duration":                  "duration:"
+  },
+  "episode_units": {
+    "duration_hour":                  "hour",
+    "duration_hours":                 "hours",
+    "duration_minutes":               "minutes"
+  }
+}
+
+var constants = {
+  "debug":                            false,
+  "title":                            "Crackle: Program Guide",
+  "target_pathname":                  "/tos",
+  "dom_ids": {
+    "div_root":                       "Crackle_EPG",
+    "div_filters":                    "EPG_filters",
+    "div_tools":                      "EPG_tools",
+    "div_data":                       "EPG_data",
+    "select_type":                    "channel_types",
+    "select_category":                "channel_categories",
+    "text_query":                     "channel_search_query"
+  },
+  "dom_classes": {
+    "data_loaded":                    "loaded",
+    "toggle_collapsed":               "collapsible_state_closed",
+    "toggle_expanded":                "collapsible_state_opened",
+    "div_heading":                    "heading",
+    "div_toggle":                     "toggle_collapsible",
+    "div_collapsible":                "collapsible",
+    "div_episodes":                   "episodes",
+    "div_webcast_icons":              "icons-container"
+  },
+  "img_urls": {
+    "icon_expand":                    "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.arrow_drop_down_circle.twotone.png",
+    "icon_collapse":                  "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.expand_less.round.png",
+    "base_webcast_reloaded_icons":    "https://github.com/warren-bank/crx-webcast-reloaded/raw/gh-pages/chrome_extension/2-release/popup/img/"
+  },
+  "base_website_url":                 "https://www.crackle.com/watch/",
+  "country":                          "US",
+  "language_locale":                  "en-US",
+  "epg_data_cache_storage_key":       "epg_data",
+  "epg_data_xhr_page_size":           20
 }
 
 // ----------------------------------------------------------------------------- libraries
@@ -83,7 +151,7 @@ var get_webcast_reloaded_url = function(video_url, vtt_url, referer_url, force_h
 
   encoded_video_url     = encodeURIComponent(encodeURIComponent(btoa(video_url)))
   encoded_vtt_url       = vtt_url ? encodeURIComponent(encodeURIComponent(btoa(vtt_url))) : null
-  referer_url           = referer_url ? referer_url : unsafeWindow.location.href
+  referer_url           = referer_url ? referer_url : constants.base_website_url
   encoded_referer_url   = encodeURIComponent(encodeURIComponent(btoa(referer_url)))
 
   webcast_reloaded_base = {
@@ -103,6 +171,18 @@ var get_webcast_reloaded_url = function(video_url, vtt_url, referer_url, force_h
   return webcast_reloaded_url
 }
 
+var get_webcast_reloaded_url_chromecast_sender = function(video_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ null, /* force_https= */ null).replace('/index.html', '/chromecast_sender.html')
+}
+
+var get_webcast_reloaded_url_airplay_sender = function(video_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/airplay_sender.es5.html')
+}
+
+var get_webcast_reloaded_url_proxy = function(hls_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(hls_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/proxy.html')
+}
+
 // ----------------------------------------------------------------------------- URL redirect
 
 var redirect_to_url = function(url) {
@@ -120,7 +200,7 @@ var process_video_url = function(video_url, video_type, vtt_url, referer_url) {
   if (!vtt_url)
     vtt_url = ''
   if (!referer_url)
-    referer_url = unsafeWindow.location.href
+    referer_url = constants.base_website_url
 
   if (typeof GM_startIntent === 'function') {
     // running in Android-WebMonkey: open Intent chooser
@@ -141,22 +221,11 @@ var process_hls_url = function(hls_url, vtt_url, referer_url) {
   process_video_url(/* video_url= */ hls_url, /* video_type= */ 'application/x-mpegurl', vtt_url, referer_url)
 }
 
+var process_dash_url = function(dash_url, vtt_url, referer_url) {
+  process_video_url(/* video_url= */ dash_url, /* video_type= */ 'application/dash+xml', vtt_url, referer_url)
+}
+
 // ----------------------------------------------------------------------------- helpers
-
-var repeat_string = function(str, count) {
-  var rep = ''
-  for (var i=0; i < count; i++)
-    rep += str
-  return rep
-}
-
-var pad_zeros = function(num, len) {
-  var str = num.toString()
-  var pad = len - str.length
-  if (pad > 0)
-    str = repeat_string('0', pad) + str
-  return str
-}
 
 // make GET request, parse JSON response, pass data to callback
 var download_json = function(url, headers, callback) {
@@ -202,294 +271,1235 @@ debug(9, function(){
   return null
 })
 
-// ----------------------------------------------------------------------------- process page for TV series
+// -----------------------------------------------------------------------------
 
-var process_series = function(series_id) {
-  var download_series_json = function(media_playlist_url, callback) {
-    var headers = {
-      "Accept": "application/json"
-    }
+var repeat_string = function(str, count) {
+  var rep = ''
+  for (var i=0; i < count; i++)
+    rep += str
+  return rep
+}
 
-    download_json(media_playlist_url, headers, callback)
+var pad_zeros = function(num, len) {
+  var str = num.toString()
+  var pad = len - str.length
+  if (pad > 0)
+    str = repeat_string('0', pad) + str
+  return str
+}
+
+// %Y%m%d%H%M @ https://strftime.org/ => 197001012359
+var get_timestamp = function(d) {
+  var timestamp = ''
+    + d.getUTCFullYear()
+    + pad_zeros(d.getUTCMonth() + 1, 2)
+    + pad_zeros(d.getUTCDate(),      2)
+    + pad_zeros(d.getUTCHours(),     2)
+    + pad_zeros(d.getUTCMinutes(),   2)
+
+  return timestamp
+}
+
+var buf2hex = function(buffer) {
+  return Array.prototype.map.call(
+    new Uint8Array(buffer),
+    function(x) {return ('00' + x.toString(16)).slice(-2)}
+  ).join('').toUpperCase()
+}
+
+var get_hmac = function(media_detail_url, timestamp) {
+  var key = 'IGSLUQCBDFHEOIFM'
+  var msg = [media_detail_url, timestamp].join('|')
+
+  var mac = new unsafeWindow.Digest.HMAC_SHA1()
+  mac.setKey(key)
+  mac.update(msg)
+
+  return buf2hex(mac.finalize())
+}
+
+// ----------------------------------------------------------------------------- DOM: static skeleton
+
+var reinitialize_dom = function() {
+  var head = unsafeWindow.document.getElementsByTagName('head')[0]
+  var body = unsafeWindow.document.body
+
+  var html = {
+    "head": [
+      '<style>',
+
+      // --------------------------------------------------- CSS: global
+
+      'body {',
+      '  background-color: #fff;',
+      '  text-align: center;',
+      '}',
+
+      'a {',
+      '  display: block;',
+      '  margin: 0;',
+      '  color: blue;',
+      '  text-decoration: none;',
+      '}',
+
+      // --------------------------------------------------- CSS: EPG filters
+
+      '#EPG_filters {',
+      '}',
+
+      '#EPG_filters > div {',
+      '  margin: 1.25em 0;',
+      '}',
+      '#EPG_filters > div:first-child {',
+      '  margin-top: 0;',
+      '}',
+      '#EPG_filters > div:last-child {',
+      '  margin-bottom: 0;',
+      '}',
+
+      '#EPG_filters > div > h4 {',
+      '  margin: 0;',
+      '}',
+
+      '#EPG_filters > div > input,',
+      '#EPG_filters > div > select,',
+      '#EPG_filters > div > button {',
+      '  display: inline-block;',
+      '  margin: 0px;',
+      '}',
+
+      '#EPG_filters > div > input,',
+      '#EPG_filters > div > select {',
+      '  margin-left: 0.75em;',
+      '}',
+
+      // --------------------------------------------------- CSS: EPG tools
+
+      '#EPG_tools {',
+      '}',
+
+      '#EPG_tools > div {',
+      '  margin: 1.25em 0;',
+      '}',
+      '#EPG_tools > div:first-child {',
+      '  margin-top: 0;',
+      '}',
+      '#EPG_tools > div:last-child {',
+      '  margin-bottom: 0;',
+      '}',
+
+      '#EPG_tools > div > h4 {',
+      '  margin: 0;',
+      '}',
+
+      '#EPG_tools > div > button {',
+      '  display: inline-block;',
+      '  margin: 0px;',
+      '}',
+      '#EPG_tools > div > button + button {',
+      '  margin-left: 1.25em;',
+      '}',
+
+      '#EPG_tools > div > button > * {',
+      '  vertical-align: middle;',
+      '}',
+      '#EPG_tools > div > button > img {',
+      '  display: inline-block;',
+      '  background-color: #999;',
+      '  margin-right: 0.5em;',
+      '}',
+
+      // --------------------------------------------------- CSS: EPG data
+
+      '#EPG_data {',
+      '  margin-top: 0.5em;',
+      '  text-align: left;',
+      '}',
+
+      '#EPG_data > div {',
+      '  border: 1px solid #333;',
+      '}',
+
+      '#EPG_data > div > div.heading {',
+      '  position: relative;',
+      '  z-index: 1;',
+      '  overflow: hidden;',
+      '}',
+
+      '#EPG_data > div > div.heading > h2 {',
+      '  display: block;',
+      '  margin: 0;',
+      '  margin-right: 94px;',
+      '  background-color: #ccc;',
+      '  padding: 0.25em;',
+      '}',
+
+      '#EPG_data > div > div.heading > div.toggle_collapsible {',
+      '  display: block;',
+      '  width: 94px;',
+      '  background-color: #999;',
+      '  position: absolute;',
+      '  z-index: 1;',
+      '  top: 0;',
+      '  bottom: 0;',
+      '  right: 0;',
+      '  cursor: help;',
+      '}',
+
+      '#EPG_data > div > div.collapsible {',
+      '  padding: 0.5em;',
+      '}',
+
+      '#EPG_data > div > div.collapsible > div.icons-container {',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li > table {',
+      '  min-height: 70px;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li > table td:first-child {',
+      '  font-style: italic;',
+      '  padding-right: 1em;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li > blockquote {',
+      '  display: block;',
+      '  background-color: #eee;',
+      '  padding: 0.5em 1em;',
+      '  margin: 0;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li > button {',
+      '  margin: 0.75em 0;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li > div.icons-container {',
+      '}',
+
+      // --------------------------------------------------- CSS: EPG data (collapsible toggle state)
+
+      '#EPG_data > div > div.heading > div.toggle_collapsible {',
+      '  background-repeat: no-repeat;',
+      '  background-position: center;',
+      '}',
+
+      '#EPG_data > div.collapsible_state_closed > div.heading > div.toggle_collapsible {',
+      '  background-image: url("' + constants.img_urls.icon_expand + '");',
+      '}',
+      '#EPG_data > div.collapsible_state_closed > div.collapsible {',
+      '  display: none;',
+      '}',
+
+      '#EPG_data > div.collapsible_state_opened > div.heading > div.toggle_collapsible {',
+      '  background-image: url("' + constants.img_urls.icon_collapse + '");',
+      '}',
+      '#EPG_data > div.collapsible_state_opened > div.collapsible {',
+      '  display: block;',
+      '}',
+
+      // --------------------------------------------------- CSS: EPG data (links to tools on Webcast Reloaded website)
+
+      '#EPG_data > div > div.collapsible div.icons-container {',
+      '  display: block;',
+      '  position: relative;',
+      '  z-index: 1;',
+      '  float: right;',
+      '  margin: 0.5em;',
+      '  width: 60px;',
+      '  height: 60px;',
+      '  max-height: 60px;',
+      '  vertical-align: top;',
+      '  background-color: #d7ecf5;',
+      '  border: 1px solid #000;',
+      '  border-radius: 14px;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.icons-container > a.chromecast,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.chromecast > img,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay > img,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.proxy,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.proxy > img,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.video-link,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.video-link > img {',
+      '  display: block;',
+      '  width: 25px;',
+      '  height: 25px;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.icons-container > a.chromecast,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.proxy,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.video-link {',
+      '  position: absolute;',
+      '  z-index: 1;',
+      '  text-decoration: none;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.icons-container > a.chromecast,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay {',
+      '  top: 0;',
+      '}',
+      '#EPG_data > div > div.collapsible div.icons-container > a.proxy,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.video-link {',
+      '  bottom: 0;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.icons-container > a.chromecast,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.proxy {',
+      '  left: 0;',
+      '}',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay,',
+      '#EPG_data > div > div.collapsible div.icons-container > a.video-link {',
+      '  right: 0;',
+      '}',
+      '#EPG_data > div > div.collapsible div.icons-container > a.airplay + a.video-link {',
+      '  right: 17px; /* (60 - 25)/2 to center when there is no proxy icon */',
+      '}',
+
+      // --------------------------------------------------- CSS: separation between EPG sections
+
+      '#Crackle_EPG > #EPG_filters,',
+      '#Crackle_EPG > #EPG_tools,',
+      '#Crackle_EPG > #EPG_data {',
+      '  display: none;',
+      '}',
+
+      '#Crackle_EPG.loaded > #EPG_filters,',
+      '#Crackle_EPG.loaded > #EPG_tools,',
+      '#Crackle_EPG.loaded > #EPG_data {',
+      '  display: block;',
+      '}',
+
+      '#Crackle_EPG.loaded > #EPG_tools,',
+      '#Crackle_EPG.loaded > #EPG_data {',
+      '  margin-top: 0.5em;',
+      '  border-top: 1px solid #333;',
+      '  padding-top: 0.5em;',
+      '}',
+
+      '</style>'
+    ],
+    "body": [
+      '<div id="Crackle_EPG">',
+      '  <div id="EPG_filters"></div>',
+      '  <div id="EPG_tools"></div>',
+      '  <div id="EPG_data"></div>',
+      '</div>'
+    ]
   }
 
-  var display_videos = function(series_id, videos) {
-    var links = []
-    var video, title, url, info
+  head.innerHTML = '' + html.head.join("\n")
+  body.innerHTML = '' + html.body.join("\n")
 
-    for (var i=0; i < videos.length; i++) {
-      video = videos[i]
-      title = (video.Season && video.Episode)
-        ? ('S' + pad_zeros(video.Season, 2) + 'E' + pad_zeros(video.Episode, 2) + ' - ' + video.ShowName + ' - ' + video.Title)
-        : video.Title
+  unsafeWindow.document.title = constants.title
+}
 
-      url  = 'https://www.crackle.com/watch/' + series_id + '/' + video.Id
-      info = video.Description
+// ----------------------------------------------------------------------------- DOM: dynamic elements - common
 
-      links.push({title: title, url: url, info: info})
+var make_element = function(elementName, html) {
+  var el = unsafeWindow.document.createElement(elementName)
+
+  if (html)
+    el.innerHTML = html
+
+  return el
+}
+
+var make_span = function(text) {return make_element('span', text)}
+var make_h4   = function(text) {return make_element('h4',   text)}
+
+// ----------------------------------------------------------------------------- DOM: dynamic elements - filters
+
+var active_filters = {
+  "type":       "",
+  "category":   "",
+  "text_query": ""
+}
+
+var process_filters = function(type, category, text_query) {
+  if ((active_filters.type === type) && (active_filters.category === category) && (active_filters.text_query === text_query)) return
+
+  active_filters.type       = type
+  active_filters.category   = category
+  active_filters.text_query = text_query
+
+  var EPG_data = unsafeWindow.document.getElementById(constants.dom_ids.div_data)
+  var channel_divs = EPG_data.childNodes
+  var channel_div, is_visible, type_id, category_id, channel_name
+
+  for (var i=0; i < channel_divs.length; i++) {
+    channel_div = channel_divs[i]
+
+    if (channel_div && (channel_div instanceof HTMLElement) && (channel_div.nodeName === 'DIV')) {
+      is_visible = true
+
+      if (is_visible && type) {
+        type_id = channel_div.getAttribute('x-type-id')
+
+        if (type_id !== type)
+          is_visible = false
+      }
+
+      if (is_visible && category) {
+        category_id = channel_div.getAttribute('x-category-id')
+
+        if (category_id !== category)
+          is_visible = false
+      }
+
+      if (is_visible && text_query) {
+        channel_name = channel_div.getAttribute('x-channel-name')
+
+        if (channel_name.indexOf(text_query) === -1)
+          is_visible = false
+      }
+
+      channel_div.style.display = is_visible ? 'block' : 'none'
+    }
+  }
+}
+
+var onclick_filter_button = function() {
+  var type       = unsafeWindow.document.getElementById(constants.dom_ids.select_type).value
+  var category   = unsafeWindow.document.getElementById(constants.dom_ids.select_category).value
+  var text_query = unsafeWindow.document.getElementById(constants.dom_ids.text_query).value.toLowerCase()
+
+  process_filters(type, category, text_query)
+}
+
+var make_filter_button = function() {
+  var button = make_element('button')
+
+  button.innerHTML = strings.button_filter
+  button.addEventListener("click", onclick_filter_button)
+
+  return button
+}
+
+var make_type_select_element = function() {
+  var select = make_element('select')
+  select.setAttribute('id', constants.dom_ids.select_type)
+  return select
+}
+
+var make_category_select_element = function() {
+  var select = make_element('select')
+  select.setAttribute('id', constants.dom_ids.select_category)
+  return select
+}
+
+var make_text_query_input_element = function() {
+  var input = make_element('input')
+  input.setAttribute('id', constants.dom_ids.text_query)
+  input.setAttribute('type', 'text')
+  return input
+}
+
+var populate_dom_filters = function() {
+  var select_type     = make_type_select_element()
+  var select_category = make_category_select_element()
+  var text_query      = make_text_query_input_element()
+  var filter_button   = make_filter_button()
+  var EPG_filters     = unsafeWindow.document.getElementById(constants.dom_ids.div_filters)
+  var div
+
+  EPG_filters.innerHTML  = ''
+
+  div = make_element('div')
+  div.appendChild(make_h4(strings.heading_filters))
+  EPG_filters.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(make_span(strings.label_type))
+  div.appendChild(select_type)
+  EPG_filters.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(make_span(strings.label_category))
+  div.appendChild(select_category)
+  EPG_filters.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(make_span(strings.label_name))
+  div.appendChild(text_query)
+  EPG_filters.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(filter_button)
+  EPG_filters.appendChild(div)
+}
+
+// ----------------------------------------------------------------------------- DOM: dynamic elements - tools
+
+var process_expand_or_collapse_all_button = function(expand, exclude_filtered_channels) {
+  var EPG_data = unsafeWindow.document.getElementById(constants.dom_ids.div_data)
+  var channel_divs = EPG_data.childNodes
+  var channel_div, is_expanded, is_filtered_channel
+
+  for (var i=0; i < channel_divs.length; i++) {
+    channel_div = channel_divs[i]
+    is_expanded = channel_div.classList.contains(constants.dom_classes.toggle_expanded)
+
+    // short-circuit if nothing to do
+    if (is_expanded == expand) continue
+
+    if (exclude_filtered_channels) {
+      is_filtered_channel = (channel_div.style.display === 'none')
+
+      // short-circuit if filtered/nonvisible channels are excluded
+      if (is_filtered_channel) continue
     }
 
-    var html = ''
-    html += '<ul>' + "\n"
-    html += links.map(
-        function(link) {
-          var title = link.title
-          var url   = link.url
-          var info  = link.info
+    channel_div.className = (expand)
+      ? constants.dom_classes.toggle_expanded
+      : constants.dom_classes.toggle_collapsed
+  }
+}
 
-          return '  <li><a target="_blank" href="' + url + '" title="' + info.replace(/"/g, '&quot;') + '">' + title + '</a></li>'
+var onclick_expand_all_button = function() {
+  process_expand_or_collapse_all_button(true, false)
+}
+
+var onclick_collapse_all_button = function() {
+  process_expand_or_collapse_all_button(false, false)
+}
+
+var make_expand_all_button = function() {
+  var button = make_element('button')
+
+  button.innerHTML = '<img src="' + constants.img_urls.icon_expand + '" /> ' + strings.button_expand_all
+  button.addEventListener("click", onclick_expand_all_button)
+
+  return button
+}
+
+var make_collapse_all_button = function() {
+  var button = make_element('button')
+
+  button.innerHTML = '<img src="' + constants.img_urls.icon_collapse + '" /> ' + strings.button_collapse_all
+  button.addEventListener("click", onclick_collapse_all_button)
+
+  return button
+}
+
+var populate_dom_tools = function() {
+  var expand_all_button   = make_expand_all_button()
+  var collapse_all_button = make_collapse_all_button()
+  var EPG_tools           = unsafeWindow.document.getElementById(constants.dom_ids.div_tools)
+  var div
+
+  EPG_tools.innerHTML  = ''
+
+  div = make_element('div')
+  div.appendChild(make_h4(strings.heading_tools))
+  EPG_tools.appendChild(div)
+
+  div = make_element('div')
+  div.appendChild(expand_all_button)
+  div.appendChild(collapse_all_button)
+  EPG_tools.appendChild(div)
+}
+
+// ----------------------------------------------------------------------------- DOM: dynamic elements - EPG data - 3rd pass (manual, link to video stream for one chosen movie or TV series episode)
+
+var make_webcast_reloaded_div = function(video_url, vtt_url, referer_url) {
+  var webcast_reloaded_urls = {
+//  "index":             get_webcast_reloaded_url(                  video_url, vtt_url, referer_url),
+    "chromecast_sender": get_webcast_reloaded_url_chromecast_sender(video_url, vtt_url, referer_url),
+    "airplay_sender":    get_webcast_reloaded_url_airplay_sender(   video_url, vtt_url, referer_url),
+    "proxy":             get_webcast_reloaded_url_proxy(            video_url, vtt_url, referer_url)
+  }
+
+  var div = make_element('div')
+
+  var html = [
+    '<a target="_blank" class="chromecast" href="' + webcast_reloaded_urls.chromecast_sender + '" title="Chromecast Sender"><img src="'       + constants.img_urls.base_webcast_reloaded_icons + 'chromecast.png"></a>',
+    '<a target="_blank" class="airplay" href="'    + webcast_reloaded_urls.airplay_sender    + '" title="ExoAirPlayer Sender"><img src="'     + constants.img_urls.base_webcast_reloaded_icons + 'airplay.png"></a>',
+    '<a target="_blank" class="proxy" href="'      + webcast_reloaded_urls.proxy             + '" title="HLS-Proxy Configuration"><img src="' + constants.img_urls.base_webcast_reloaded_icons + 'proxy.png"></a>',
+    '<a target="_blank" class="video-link" href="' + video_url                                 + '" title="direct link to video"><img src="'    + constants.img_urls.base_webcast_reloaded_icons + 'video_link.png"></a>'
+  ]
+
+  div.setAttribute('class', constants.dom_classes.div_webcast_icons)
+  div.innerHTML = html.join("\n")
+
+  return div
+}
+
+var insert_webcast_reloaded_div = function(block_element, video_url, vtt_url, referer_url) {
+  var webcast_reloaded_div = make_webcast_reloaded_div(video_url, vtt_url, referer_url)
+
+  if (block_element.childNodes.length)
+    block_element.insertBefore(webcast_reloaded_div, block_element.childNodes[0])
+  else
+    block_element.appendChild(webcast_reloaded_div)
+}
+
+var download_video = function(video_id, block_element, old_button) {
+  var url = 'https://web-api-us.crackle.com/Service.svc/details/media/' + video_id + '/' + constants.country + '?disableProtocols=true'
+
+  var timestamp = get_timestamp(new Date())
+  var hmac      = get_hmac(url, timestamp)
+
+  var headers = {
+    "Accept"        : "application/json",
+    "Authorization" : [hmac, timestamp, '117', '1'].join('|')
+  }
+
+  var callback = function(media) {
+    if (!media || !media.MediaURLs || !Array.isArray(media.MediaURLs) || !media.MediaURLs.length) return
+
+    var types, type, obj, video_url, video_type, vtt_url
+
+    var preprocess_video_url = function() {
+      var embedded_advertising_qs_params = /(?:expand|ad|ad\.locationDesc|ad\.bumper|ad\.preroll|extsid|ad\.metr|euid)=[^&]*[&]?/ig
+      video_url = video_url.replace(embedded_advertising_qs_params, '')
+    }
+
+    types = [
+      ['AppleTV.m3u8',   'application/x-mpegurl'],
+      ['Playready_DASH', 'application/dash+xml'],
+      ['Widevine_DASH',  'application/dash+xml']
+    ]
+
+    for (var i=0; !video_url && (i < types.length); i++) {
+      type = types[i]
+
+      for (var i2=0; !video_url && (i2 < media.MediaURLs.length); i2++) {
+        obj = media.MediaURLs[i2]
+
+        if (!video_url && (obj.Type === type[0]) && (obj.Path || obj.DRMPath)) {
+          video_url  = obj.Path || obj.DRMPath
+          video_type = type[1]
         }
-      ).join("\n")
-    html += "\n" + '</ul>'
+      }
+    }
 
-    unsafeWindow.document.body.innerHTML = html
-    unsafeWindow.document.body.style.backgroundColor = 'white'
+    if (!video_url) return
+
+    if (video_url && (video_url[0] === '/'))
+      video_url = 'https:' + video_url
+
+    if (media.ClosedCaptionFiles && Array.isArray(media.ClosedCaptionFiles) && media.ClosedCaptionFiles.length) {
+
+      types = ['VTT', 'SRT']
+
+      for (var i=0; !vtt_url && (i < types.length); i++) {
+        type = types[i]
+
+        for (var i2=0; !vtt_url && (i2 < media.ClosedCaptionFiles.length); i2++) {
+          obj = media.ClosedCaptionFiles[i2]
+
+          if (!vtt_url && (!constants.language_locale || (obj.Locale === constants.language_locale)) && (obj.Type === type) && obj.Path) {
+            vtt_url = obj.Path
+          }
+        }
+      }
+
+      if (vtt_url && (vtt_url[0] === '/'))
+        vtt_url = 'https:' + vtt_url
+    }
+
+    preprocess_video_url()
+    insert_webcast_reloaded_div(block_element, video_url, vtt_url)
+    add_start_video_button(video_url, video_type, vtt_url, block_element, old_button)
   }
 
-  var request_playlist_detail = function(series_id) {
-    var media_playlist_url = 'https://web-api-us.crackle.com/Service.svc/channel/' + series_id + '/playlists/all/US'
+  download_json(url, headers, callback)
+}
 
-    var callback = function(media) {
-      var videos = []
-      var playlist, item
+// -----------------------------------------------------------------------------
 
-      if (media.Playlists && Array.isArray(media.Playlists) && media.Playlists.length) {
-        for (var i=0; i < media.Playlists.length; i++) {
-          playlist = media.Playlists[i]
+var onclick_start_video_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
 
-          if ((playlist instanceof Object) && playlist.Items && Array.isArray(playlist.Items) && playlist.Items.length) {
-            for (var i2=0; i2 < playlist.Items.length; i2++) {
-              item = playlist.Items[i2]
+  var button     = event.target
+  var video_url  = button.getAttribute('x-video-url')
+  var video_type = button.getAttribute('x-video-type')
+  var vtt_url    = button.getAttribute('x-vtt-url')
 
-              if ((item instanceof Object) && item.MediaInfo && (item.MediaInfo instanceof Object) && item.MediaInfo.Id) {
-                videos.push(item.MediaInfo)
-              }
+  if (video_url)
+    process_video_url(video_url, video_type, vtt_url)
+}
+
+var make_start_video_button = function(video_url, video_type, vtt_url) {
+  var button = make_element('button')
+
+  button.setAttribute('x-video-url',  video_url)
+  button.setAttribute('x-video-type', video_type)
+  button.setAttribute('x-vtt-url',    vtt_url)
+  button.innerHTML = strings.button_start_video
+  button.addEventListener("click", onclick_start_video_button)
+
+  return button
+}
+
+var add_start_video_button = function(video_url, video_type, vtt_url, block_element, old_button) {
+  var new_button = make_start_video_button(video_url, video_type, vtt_url)
+
+  if (old_button)
+    old_button.parentNode.replaceChild(new_button, old_button)
+  else
+    block_element.appendChild(new_button)
+}
+
+// ----------------------------------------------------------------------------- DOM: dynamic elements - EPG data - 2nd pass (manual, list all episodes in one chosen TV series)
+
+var convert_ms_to_mins = function(X) {
+  // (X ms)(1 sec / 1000 ms)(1 min / 60 sec)
+  return Math.ceil(X / 60000)
+}
+
+var get_ms_duration_time_string = function(ms) {
+  var time_string = ''
+  var mins = convert_ms_to_mins(ms)
+  var hours
+
+  if (mins >= 60) {
+    hours       = Math.floor(mins / 60)
+    time_string = hours + ' ' + ((hours < 2) ? strings.episode_units.duration_hour : strings.episode_units.duration_hours) + ', '
+    mins        = mins % 60
+  }
+
+  return time_string + mins + ' ' + strings.episode_units.duration_minutes
+}
+
+var make_episode_listitem_html = function(data) {
+  if (data.duration)
+    data.duration = get_ms_duration_time_string(data.duration)
+
+  var tr = []
+
+  var append_tr = function(td, colspan) {
+    if (Array.isArray(td))
+      tr.push('<tr><td>' + td.join('</td><td>') + '</td></tr>')
+    else if ((typeof colspan === 'number') && (colspan > 1))
+      tr.push('<tr><td colspan="' + colspan + '">' + td + '</td></tr>')
+    else
+      tr.push('<tr><td>' + td + '</td></tr>')
+  }
+
+  if (data.title && data.url)
+    data.title = '<a target="_blank" href="' + data.url + '">' + data.title + '</a>'
+  if (data.title)
+    append_tr([strings.episode_labels.title, data.title])
+  if (data.duration)
+    append_tr([strings.episode_labels.time_duration, data.duration])
+  if (data.description)
+    append_tr(strings.episode_labels.summary, 2)
+
+  var html = ['<table>' + tr.join("\n") + '</table>']
+  if (data.description)
+    html.push('<blockquote>' + data.description + '</blockquote>')
+
+  return '<li x-video-id="' + data.video_id + '">' + html.join("\n") + '</li>'
+}
+
+var display_episodes = function(episodes, show_id, episodes_div) {
+  var data = []
+  var episode, video_id, url, title, duration, description, html
+
+  for (var i=0; i < episodes.length; i++) {
+    episode  = episodes[i]
+    video_id = episode.Id
+    url      = constants.base_website_url + show_id + '/' + video_id
+    title    = (episode.Season && episode.Episode)
+      ? ('S' + pad_zeros(episode.Season, 2) + 'E' + pad_zeros(episode.Episode, 2) + ' - ' + episode.ShowName + ' - ' + episode.Title)
+      : episode.Title
+    duration = (typeof episode.Duration === 'number')
+      ? (episode.Duration * 1000)
+      : 0
+    description = episode.Description
+
+    if (video_id && title)
+      data.push({video_id: video_id, url: url, title: title, duration: duration, description: description})
+  }
+
+  html = '<ul>' + data.map(make_episode_listitem_html).join("\n") + '</ul>'
+  episodes_div.innerHTML = html
+
+  add_episode_div_buttons(show_id, episodes_div)
+}
+
+var download_episodes = function(type, show_id, episodes_div, button) {
+  var url = 'https://web-api-us.crackle.com/Service.svc/channel/' + show_id + '/playlists/all/US'
+
+  var headers = {
+    "Accept": "application/json"
+  }
+
+  var callback = function(media) {
+    var episodes = []
+    var playlist, item
+
+    if (media.Playlists && Array.isArray(media.Playlists) && media.Playlists.length) {
+      for (var i=0; i < media.Playlists.length; i++) {
+        playlist = media.Playlists[i]
+
+        if ((playlist instanceof Object) && playlist.Items && Array.isArray(playlist.Items) && playlist.Items.length) {
+          for (var i2=0; i2 < playlist.Items.length; i2++) {
+            item = playlist.Items[i2]
+
+            if ((item instanceof Object) && item.MediaInfo && (item.MediaInfo instanceof Object) && item.MediaInfo.Id && item.MediaInfo.Title && item.MediaInfo.IsLive && !item.MediaInfo.IsTrailer) {
+              episodes.push(item.MediaInfo)
             }
           }
         }
       }
-
-      if (videos.length) {
-        if (videos.length === 1) {
-          var video_id = videos[0].Id
-          process_video(video_id)
-          return
-        }
-        display_videos(series_id, videos)
-      }
     }
 
-    download_series_json(media_playlist_url, callback)
+    if ((episodes.length === 1) && (type === 'movies')) {
+      var video_id = episodes[0].Id
+
+      if (video_id)
+        download_video(video_id, episodes_div, button)
+    }
+    else if (episodes.length) {
+      display_episodes(episodes, show_id, episodes_div)
+    }
   }
 
-  request_playlist_detail(series_id)
+  download_json(url, headers, callback)
 }
 
-// ----------------------------------------------------------------------------- process page for video
+// -----------------------------------------------------------------------------
 
-var process_video = function(video_id) {
-  if (!user_options.redirect_to_webcast_reloaded)
-    return
+var onclick_download_show_video_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
 
-  var buf2hex = function(buffer) {
-    return Array.prototype.map.call(
-      new Uint8Array(buffer),
-      function(x) {return ('00' + x.toString(16)).slice(-2)}
-    ).join('').toUpperCase()
+  var button   = event.target
+  var show_id  = parseInt(button.getAttribute('x-show-id'), 10)
+  if (!show_id || isNaN(show_id)) return
+  var video_id = parseInt(button.getAttribute('x-video-id'), 10)
+  if (!video_id || isNaN(video_id)) return
+
+  var episodes_div = unsafeWindow.document.querySelector('#shows_' + show_id + ' div.' + constants.dom_classes.div_episodes)
+  if (!episodes_div) return
+
+  var episode_item = episodes_div.querySelector('li[x-video-id="' + video_id + '"]')
+  if (!episode_item) return
+
+  download_video(video_id, episode_item, button)
+}
+
+var make_download_show_video_button = function(show_id, video_id) {
+  var button = make_element('button')
+
+  button.setAttribute('x-show-id', show_id)
+  button.setAttribute('x-video-id', video_id)
+  button.innerHTML = strings.button_download_video
+  button.addEventListener("click", onclick_download_show_video_button)
+
+  return button
+}
+
+var add_episode_div_buttons = function(show_id, episodes_div) {
+  var episode_items = episodes_div.querySelectorAll('li[x-video-id]')
+  var episode_item, video_id, button
+
+  for (var i=0; i < episode_items.length; i++) {
+    episode_item = episode_items[i]
+
+    video_id = parseInt(episode_item.getAttribute('x-video-id'), 10)
+    if (!video_id || isNaN(video_id)) continue
+
+    button = make_download_show_video_button(show_id, video_id)
+    episode_item.appendChild(button)
+  }
+}
+
+// ----------------------------------------------------------------------------- DOM: dynamic elements - EPG data - 1st pass (automatic, list all TV series and movies)
+
+var active_channel_types      = {"shows": strings.types.shows, "movies": strings.types.movies}
+var active_channel_categories = {}
+
+var onclick_channel_toggle = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
+  var toggle_div = event.target
+  if (!toggle_div || !(toggle_div instanceof HTMLElement)) return
+
+  var channel_div = toggle_div.parentNode.parentNode
+  if (!channel_div || !(channel_div instanceof HTMLElement)) return
+
+  channel_div.className = (channel_div.classList.contains(constants.dom_classes.toggle_expanded))
+    ? constants.dom_classes.toggle_collapsed
+    : constants.dom_classes.toggle_expanded
+}
+
+var make_channel_div = function(type, data) {
+  if (!data || (typeof data !== 'object') || data.ClipsOnly || !data.ID || !data.Title) return null
+
+  var id, name, category, lc_category, summary, div, html
+
+  id          = data.ID
+  name        = data.Title
+  category    = data.Genre       || ''
+  lc_category = category ? category.toLowerCase() : ''
+
+  if (lc_category)
+    active_channel_categories[lc_category] = category
+
+  summary = []
+  if (data.Description)
+    summary.push(data.Description)
+  if (data.WhyItCrackles)
+    summary.push(data.WhyItCrackles)
+  if (data.DurationInSeconds)
+    summary.push(strings.episode_labels.time_duration + ' ' + get_ms_duration_time_string(parseInt(data.DurationInSeconds, 10) * 1000))
+  if (summary.length)
+    summary = '<p>' + summary.join('</p><p>') + '</p>'
+
+  div = make_element('div')
+
+  html = [
+    '<div class="' + constants.dom_classes.div_heading + '">',
+    '  <h2><a target="_blank" href="' + constants.base_website_url + id + '">' + name + '</a></h2>',
+    '  <div class="' + constants.dom_classes.div_toggle + '"></div>',
+    '</div>',
+    '<div class="' + constants.dom_classes.div_collapsible + '">',
+    '  <div>' + summary + '</div>',
+    '  <div class="' + constants.dom_classes.div_episodes + '"></div>',
+    '</div>'
+  ]
+
+  div.setAttribute('id',             (type + '_' + id))
+  div.setAttribute('class',          constants.dom_classes.toggle_expanded)
+  div.setAttribute('x-type-id',      type)
+  div.setAttribute('x-category-id',  lc_category)
+  div.setAttribute('x-channel-name', name.toLowerCase())
+  div.innerHTML = html.join("\n")
+  div.querySelector(':scope > div.' + constants.dom_classes.div_heading + ' > div.' + constants.dom_classes.div_toggle).addEventListener("click", onclick_channel_toggle)
+
+  add_channel_div_buttons(type, data, div)
+
+  return div
+}
+
+var process_epg_data = function(channel_type, data) {
+  if (!data || !Array.isArray(data) || !data.length) return
+
+  var EPG_data = unsafeWindow.document.getElementById(constants.dom_ids.div_data)
+  var channel_data, div
+
+  for (var i=0; i < data.length; i++) {
+    channel_data = data[i]
+
+    div = make_channel_div(channel_type, channel_data)
+    if (div) {
+      EPG_data.appendChild(div)
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+
+var onclick_download_episodes_button = function(event) {
+  event.stopPropagation();event.stopImmediatePropagation();event.preventDefault();event.returnValue=true;
+
+  var button  = event.target
+  var type    = button.getAttribute('x-type-id')
+  var show_id = parseInt(button.getAttribute('x-show-id'), 10)
+  if (!show_id || isNaN(show_id)) return
+
+  var episodes_div = unsafeWindow.document.querySelector('#' + type + '_' + show_id + ' div.' + constants.dom_classes.div_episodes)
+  if (!episodes_div) return
+
+  // in the case of a movie:
+  // - block element to contain a group of icons to access Webcast-Reloaded tools
+  // - choose ".collapsible", rather than ".episodes"
+  if (type === 'movies')
+    episodes_div = episodes_div.parentNode
+
+  download_episodes(type, show_id, episodes_div, button)
+}
+
+var make_download_episodes_button = function(type, show_id) {
+  var button = make_element('button')
+
+  // movies also need to perform the 2nd pass, but the resulting data will only include a single "episode".
+  // the user doesn't need to be aware of this pass;
+  // when the data returned by the 2nd pass only includes a single "episode",
+  // rather than displaying a detailed list,
+  // the script will silently perform the 3rd pass,
+  // which replaces this button with a button to start the video (and add a group of icons to access Webcast-Reloaded tools)
+  var label = (type === 'movies') ? strings.button_download_video : strings.button_download_episodes
+
+  button.setAttribute('x-type-id', type)
+  button.setAttribute('x-show-id', show_id)
+  button.innerHTML = label
+  button.addEventListener("click", onclick_download_episodes_button)
+
+  return button
+}
+
+var add_channel_div_buttons = function(type, data, div) {
+  var episodes_div = div.querySelector('div.' + constants.dom_classes.div_episodes)
+  var button = make_download_episodes_button(type, data.ID)
+
+  episodes_div.innerHTML = ''
+  episodes_div.appendChild(button)
+}
+
+// -----------------------------------------------------------------------------
+
+var populate_type_select_filter = function() {
+  var select = unsafeWindow.document.getElementById(constants.dom_ids.select_type)
+  var option, keys, value, name
+
+  select.innerHTML = ''
+
+  option = make_element('option')
+  option.setAttribute('selected', 'selected')
+  option.setAttribute('value', '')
+  option.innerHTML = strings.default_type
+  select.appendChild(option)
+
+  keys = Object.keys(active_channel_types)
+  if (!keys || !Array.isArray(keys) || !keys.length) return
+
+  for (var i=0; i < keys.length; i++) {
+    value = keys[i]
+    name  = active_channel_types[value]
+
+    if (value && name) {
+      option = make_element('option')
+      option.setAttribute('value', value)
+      option.innerHTML = name
+      select.appendChild(option)
+    }
+  }
+}
+
+var populate_category_select_filter = function() {
+  var select = unsafeWindow.document.getElementById(constants.dom_ids.select_category)
+  var option, keys, value, name
+
+  select.innerHTML = ''
+
+  option = make_element('option')
+  option.setAttribute('selected', 'selected')
+  option.setAttribute('value', '')
+  option.innerHTML = strings.default_category
+  select.appendChild(option)
+
+  keys = Object.keys(active_channel_categories)
+  if (!keys || !Array.isArray(keys) || !keys.length) return
+
+  for (var i=0; i < keys.length; i++) {
+    value = keys[i]
+    name  = active_channel_categories[value]
+
+    if (value && name) {
+      option = make_element('option')
+      option.setAttribute('value', value)
+      option.innerHTML = name
+      select.appendChild(option)
+    }
+  }
+}
+
+var post_process_epg_data = function() {
+  // called after 1st pass is complete
+
+  var EPG_root = unsafeWindow.document.getElementById(constants.dom_ids.div_root)
+
+  populate_type_select_filter()
+  populate_category_select_filter()
+
+  if (!EPG_root.classList.contains(constants.dom_classes.data_loaded))
+    EPG_root.className = constants.dom_classes.data_loaded
+}
+
+// ----------------------------------------------------------------------------- EPG: data cache
+
+var epg_data_cache = {
+  data: {
+    shows: [],
+    movies: []
+  },
+  add_raw_data: function(type, entries) {
+    var old_entry, new_entry
+
+    for (var i=0; i < entries.length; i++) {
+      old_entry = entries[i]
+      new_entry = {}
+
+      if (!old_entry || (typeof old_entry !== 'object') || old_entry.ClipsOnly || !old_entry.ID || !old_entry.Title)
+        continue
+
+      new_entry.ID                = old_entry.ID
+      new_entry.Title             = old_entry.Title
+      new_entry.Genre             = old_entry.Genre
+      new_entry.Description       = old_entry.Description
+      new_entry.WhyItCrackles     = old_entry.WhyItCrackles
+      new_entry.DurationInSeconds = old_entry.DurationInSeconds
+
+      epg_data_cache.data[type].push(new_entry)
+    }
+  },
+  is_persistent_storage_available: function() {
+    return ((typeof GM_setValue === 'function') && (typeof GM_getValue === 'function'))
+  },
+  load_data_from_persistent_storage: function() {
+    try {
+      if (!epg_data_cache.is_persistent_storage_available()) throw ''
+
+      var json = GM_getValue(constants.epg_data_cache_storage_key, '')
+      if (!json) throw ''
+
+      var data = JSON.parse(json)
+      if (!data || (typeof data !== 'object') || !Array.isArray(data.shows) || !Array.isArray(data.movies) || !data.shows.length || !data.movies.length) throw ''
+
+      epg_data_cache.data = data
+      return true
+    }
+    catch(error) {
+      return false
+    }
+  },
+  save_data_to_persistent_storage: function() {
+    try {
+      if (!epg_data_cache.is_persistent_storage_available()) throw ''
+
+      var json = JSON.stringify(epg_data_cache.data)
+      GM_setValue(constants.epg_data_cache_storage_key, json)
+      return true
+    }
+    catch(error) {
+      return false
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------- EPG: download data, store to persistent cache
+
+var populate_epg_data_cache = function(oncomplete) {
+  var page_types = ['shows', 'movies']
+  var page_type, page_index
+
+  var callback = function(epg_data) {
+    var channel_type = page_type
+
+    if (
+         epg_data
+      && (typeof epg_data === 'object')
+      && epg_data.PageResult
+      && (typeof epg_data.PageResult === 'object')
+      && (typeof epg_data.PageResult.CurrentPage === 'number')
+      && (typeof epg_data.PageResult.TotalPages === 'number')
+      && (epg_data.PageResult.CurrentPage < epg_data.PageResult.TotalPages)
+    ) {
+      initiate_fetch()
+    }
+    else {
+      page_type  = null
+      page_index = null
+
+      initiate_fetch()
+    }
+
+    if (
+         epg_data
+      && (typeof epg_data === 'object')
+      && epg_data.Entries
+      && Array.isArray(epg_data.Entries)
+      && epg_data.Entries.length
+    ) {
+      epg_data_cache.add_raw_data(channel_type, epg_data.Entries)
+
+      // perform some (entirely unnecessary) garbage collection
+      epg_data.Entries = null
+    }
   }
 
-  var get_hmac = function(media_detail_url, timestamp) {
-    var key = 'IGSLUQCBDFHEOIFM'
-    var msg = [media_detail_url, timestamp].join('|')
+  var fetch_epg_data = function() {
+    var url = 'https://web-api-us.crackle.com/Service.svc/browse/' + page_type + '/all/all/alpha-asc/US/' + constants.epg_data_xhr_page_size + '/' + page_index
 
-    var mac = new unsafeWindow.Digest.HMAC_SHA1()
-    mac.setKey(key)
-    mac.update(msg)
-
-    return buf2hex(mac.finalize())
-  }
-
-  var download_video_json = function(media_detail_url, timestamp, hmac, callback) {
     var headers = {
-      "Accept"        : "application/json",
-      "Authorization" : [hmac, timestamp, '117', '1'].join('|')
+      "Accept": "application/json"
     }
 
-    download_json(media_detail_url, headers, callback)
+    download_json(url, headers, callback)
   }
 
-  var preprocess_video_url = function(video_url) {
-    var embedded_advertising_qs_params = /(?:expand|ad|ad\.locationDesc|ad\.bumper|ad\.preroll|extsid|ad\.metr|euid)=[^&]*[&]?/ig
-    return video_url.replace(embedded_advertising_qs_params, '')
+  var initiate_fetch = function() {
+    if (!page_type)
+      page_type = page_types.shift()
+
+    if (!page_type) {
+      if (typeof oncomplete === 'function')
+        oncomplete()
+
+      return
+    }
+
+    if (!page_index)
+      page_index = 0
+
+    page_index++
+
+    fetch_epg_data()
   }
 
-  var request_media_detail = function(video_id) {
-    // https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/crackle.py
-
-    var callback = function(media) {
-      var obj, hls_url, vtt_url
-
-      if (!media || !media.MediaURLs || !Array.isArray(media.MediaURLs) || !media.MediaURLs.length) return
-
-      for (var i=0; !hls_url && (i < media.MediaURLs.length); i++) {
-        obj = media.MediaURLs[i]
-
-        if (!hls_url && (obj.Type === 'AppleTV.m3u8') && !obj.UseDRM && obj.Path) {
-          hls_url = obj.Path
-        }
-        if (!hls_url && (obj.Type === 'AppleTV.m3u8') && obj.UseDRM && obj.DRMPath) {
-          hls_url = obj.DRMPath
-        }
-        if (hls_url && (hls_url[0] === '/')) {
-          hls_url = 'https:' + hls_url
-        }
-      }
-
-      if (!hls_url) return
-
-      if (media.ClosedCaptionFiles && Array.isArray(media.ClosedCaptionFiles) && media.ClosedCaptionFiles.length) {
-        for (var i=0; !vtt_url && (i < media.ClosedCaptionFiles.length); i++) {
-          obj = media.ClosedCaptionFiles[i]
-
-          if (!vtt_url && (obj.Type === 'VTT') && obj.Path) {
-            vtt_url = obj.Path
-          }
-          if (!vtt_url && (obj.Type === 'SRT') && obj.Path) {
-            vtt_url = obj.Path
-          }
-          if (vtt_url && (vtt_url[0] === '/')) {
-            vtt_url = 'https:' + vtt_url
-          }
-        }
-      }
-
-      hls_url = preprocess_video_url(hls_url)
-      process_hls_url(hls_url, vtt_url)
-    }
-
-    // %Y%m%d%H%M @ https://strftime.org/ => 197001012359
-    var get_timestamp = function(d) {
-      var timestamp = ''
-        + d.getUTCFullYear()
-        + pad_zeros(d.getUTCMonth() + 1, 2)
-        + pad_zeros(d.getUTCDate(),      2)
-        + pad_zeros(d.getUTCHours(),     2)
-        + pad_zeros(d.getUTCMinutes(),   2)
-
-      return timestamp
-    }
-
-    var countries = ['US', 'AU', 'CA', 'AS', 'FM', 'GU', 'MP', 'PR', 'PW', 'MH', 'VI']
-    var country, media_detail_url, timestamp, hmac
-
-    for (var i=0; i < countries.length; i++) {
-      country          = countries[i]
-      media_detail_url = 'https://web-api-us.crackle.com/Service.svc/details/media/' + video_id + '/' + country + '?disableProtocols=true'
-      timestamp        = get_timestamp(new Date())
-      hmac             = get_hmac(media_detail_url, timestamp)
-
-      download_video_json(media_detail_url, timestamp, hmac, callback)
-    }
-  }
-
-  request_media_detail(video_id)
+  initiate_fetch()
 }
 
-// ----------------------------------------------------------------------------- process page with index of TV series and videos
+// ----------------------------------------------------------------------------- EPG: build DOM from data
 
-var process_index = function() {
-  var update_links = function() {
-    var imgsrc_regex = new RegExp('^.*/channels/(\\d+)/.*$', 'i')
-    var labels = unsafeWindow.document.querySelectorAll('.mediaItem > .Item > .mediaStill + .mediaBox:not([x-modified])')
-    var label, labeltitle, image, imgsrc, video_id, video_url, video_title, anchor_style, anchor_click, anchor_html
+var populate_epg_data = function() {
+  var process_epg_data_cache = function() {
+    var data  = epg_data_cache.data
+    var types, type, entries
 
-    for (var i=0; i < labels.length; i++) {
-      label = labels[i]
+    types = Object.keys(data)
+    for (var i=0; i < types.length; i++) {
+      type    = types[i]
+      entries = data[type]
 
-      labeltitle = label.querySelector(':scope > .mediaTitle')
-      if (!labeltitle) continue
-
-      image = label.parentElement.querySelector(':scope > .mediaStill img[src]')
-      if (!image) continue
-
-      imgsrc = image.getAttribute('src')
-      if (!imgsrc_regex.test(imgsrc)) continue
-
-      video_id    = imgsrc.replace(imgsrc_regex, '$1')
-      video_url   = '/watch/' + video_id
-      video_title = labeltitle.innerText
-
-      anchor_style = 'text-decoration:none; color:inherit;'
-      anchor_click = 'event.stopPropagation(); event.stopImmediatePropagation(); return true'
-      anchor_html  = '<a target="_blank" href="' + video_url + '" style="' + anchor_style + '" onclick="' + anchor_click + '">' + video_title + '</a>'
-
-      labeltitle.innerHTML = anchor_html
-
-      label.setAttribute('x-modified', '1')
+      process_epg_data(type, entries)
     }
+
+    post_process_epg_data()
   }
 
-  update_links()
-  unsafeWindow.setInterval(update_links, 2500)
+  if (epg_data_cache.load_data_from_persistent_storage()) {
+    process_epg_data_cache()
+  }
+  else {
+    var oncomplete = function() {
+      epg_data_cache.save_data_to_persistent_storage()
+      process_epg_data_cache()
+    }
+
+    populate_epg_data_cache(oncomplete)
+  }
 }
 
 // ----------------------------------------------------------------------------- bootstrap
 
-var process_site_url = function(pathname) {
-  debug(5, 'processing url:' + "\n" + pathname)
-
-  var url_regex = {
-    series: new RegExp('^/watch/([\\d]+)$', 'i'),
-    video:  new RegExp('^/watch(?:/playlist)?/[\\d]+/([\\d]+)$', 'i'),
-    index:  new RegExp('^/(?:shows|movies)$', 'i')
-  }
-
-  if (url_regex.series.test(pathname)) {
-    debug(5, 'page type: series')
-
-    var series_id = pathname.replace(url_regex.series, '$1')
-    process_series(series_id)
-    return
-  }
-
-  if (url_regex.video.test(pathname)) {
-    debug(5, 'page type: video')
-
-    var video_id = pathname.replace(url_regex.video, '$1')
-    process_video(video_id)
-    return
-  }
-
-  if (url_regex.index.test(pathname)) {
-    debug(5, 'page type: index')
-
-    process_index()
-    return
+var prevent_history_redirects = function() {
+  if (unsafeWindow.history) {
+    unsafeWindow.history.pushState    = function(){}
+    unsafeWindow.history.replaceState = function(){}
   }
 }
 
 var init = function() {
-  // on page load
-  process_site_url(unsafeWindow.location.pathname)
+  var pathname = unsafeWindow.location.pathname
 
-  if (unsafeWindow.history) {
-    var real = {
-      pushState:    unsafeWindow.history.pushState,
-      replaceState: unsafeWindow.history.replaceState
-    }
-
-    unsafeWindow.history.pushState = function(state, title, url) {
-      process_site_url(url)
-      real.pushState.apply(unsafeWindow.history, [state, title, url])
-    }
-
-    unsafeWindow.history.replaceState = function(state, title, url) {
-      process_site_url(url)
-      real.replaceState.apply(unsafeWindow.history, [state, title, url])
-    }
+  if (pathname.indexOf(constants.target_pathname) === 0) {
+    reinitialize_dom()
+    populate_dom_filters()
+    populate_dom_tools()
+    populate_epg_data()
+  }
+  else {
+    unsafeWindow.location = constants.target_pathname
   }
 }
 
+prevent_history_redirects()
 init()
 
 // -----------------------------------------------------------------------------
