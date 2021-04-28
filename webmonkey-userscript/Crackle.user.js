@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      3.0.1
+// @version      3.0.2
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -546,6 +546,20 @@ var reinitialize_dom = function() {
       '}',
 
       '#EPG_data > div > div.collapsible > div.icons-container {',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul {',
+      '  list-style: none;',
+      '  margin: 0;',
+      '  padding: 0;',
+      '  padding-left: 1em;',
+      '}',
+
+      '#EPG_data > div > div.collapsible div.episodes > ul > li {',
+      '  list-style: none;',
+      '  margin-top: 0.5em;',
+      '  border-top: 1px solid #999;',
+      '  padding-top: 0.5em;',
       '}',
 
       '#EPG_data > div > div.collapsible div.episodes > ul > li > table {',
