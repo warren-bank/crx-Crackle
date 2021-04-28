@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      3.0.0
+// @version      3.0.1
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
 // @match        *://*.sonycrackle.com/*
 // @icon         https://www.crackle.com/config/avod/favicon/favicon.ico
 // @run-at       document-end
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        unsafeWindow
 // @homepage     https://github.com/warren-bank/crx-Crackle/tree/webmonkey-userscript/es5
 // @supportURL   https://github.com/warren-bank/crx-Crackle/issues
 // @downloadURL  https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/Crackle.user.js
