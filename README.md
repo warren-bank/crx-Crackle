@@ -28,12 +28,22 @@ Its purpose is to:
 * v1.x
   - works on deep links to the [crackle.com](https://www.crackle.com/) website
     * `/watch/movie_id`
+    * `/watch/series_id`
     * `/watch/series_id/episode_id`
   - does _not_ provide any way to navigate through the site to reach these pages
 
 * v2.x
-  - redirects all pages
+  - redirects all pages to the SPA
   - does _not_ support deep links
+
+* v3.x
+  - works on deep links to the [crackle.com](https://www.crackle.com/) website
+    * `/watch/movie_id`
+    * `/watch/series_id`
+    * `/watch/series_id/episode_id`
+  - redirects all _other_ pages to the SPA
+  - code combines _v1.x_ with _v2.x_
+    * refactors both to share common bits
 
 #### Legal:
 

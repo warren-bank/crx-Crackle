@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      2.0.0
+// @version      3.0.0
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -17,6 +17,8 @@
 // @copyright    Warren Bank
 // ==/UserScript==
 
+// ============================================================================= common to both SPA and deep links
+
 // ----------------------------------------------------------------------------- constants
 
 var user_options = {
@@ -28,74 +30,6 @@ var user_options = {
   // 1: more important
   // 9: less important
   "debug_verbosity":                  0
-}
-
-var strings = {
-  "heading_filters":                  "Filter Channels",
-  "label_type":                       "By Type:",
-  "label_category":                   "By Category:",
-  "types": {
-    "shows":                          "Television",
-    "movies":                         "Movies"
-  },
-  "default_type":                     "Show All",
-  "default_category":                 "Show All",
-  "label_name":                       "By Name:",
-  "button_filter":                    "Apply",
-
-  "heading_tools":                    "Tools",
-  "button_expand_all":                "Expand All",
-  "button_collapse_all":              "Collapse All",
-
-  "button_download_episodes":         "List All Episodes",
-  "button_download_video":            "Get Video URL",
-  "button_start_video":               "Start Video",
-
-  "episode_labels": {
-    "title":                          "title:",
-    "summary":                        "summary:",
-    "time_duration":                  "duration:"
-  },
-  "episode_units": {
-    "duration_hour":                  "hour",
-    "duration_hours":                 "hours",
-    "duration_minutes":               "minutes"
-  }
-}
-
-var constants = {
-  "debug":                            false,
-  "title":                            "Crackle: Program Guide",
-  "target_pathname":                  "/tos",
-  "dom_ids": {
-    "div_root":                       "Crackle_EPG",
-    "div_filters":                    "EPG_filters",
-    "div_tools":                      "EPG_tools",
-    "div_data":                       "EPG_data",
-    "select_type":                    "channel_types",
-    "select_category":                "channel_categories",
-    "text_query":                     "channel_search_query"
-  },
-  "dom_classes": {
-    "data_loaded":                    "loaded",
-    "toggle_collapsed":               "collapsible_state_closed",
-    "toggle_expanded":                "collapsible_state_opened",
-    "div_heading":                    "heading",
-    "div_toggle":                     "toggle_collapsible",
-    "div_collapsible":                "collapsible",
-    "div_episodes":                   "episodes",
-    "div_webcast_icons":              "icons-container"
-  },
-  "img_urls": {
-    "icon_expand":                    "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.arrow_drop_down_circle.twotone.png",
-    "icon_collapse":                  "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.expand_less.round.png",
-    "base_webcast_reloaded_icons":    "https://github.com/warren-bank/crx-webcast-reloaded/raw/gh-pages/chrome_extension/2-release/popup/img/"
-  },
-  "base_website_url":                 "https://www.crackle.com/watch/",
-  "country":                          "US",
-  "language_locale":                  "en-US",
-  "epg_data_cache_storage_key":       "epg_data",
-  "epg_data_xhr_page_size":           20
 }
 
 // ----------------------------------------------------------------------------- libraries
@@ -169,18 +103,6 @@ var get_webcast_reloaded_url = function(video_url, vtt_url, referer_url, force_h
 
   webcast_reloaded_url  = webcast_reloaded_base + '#/watch/' + encoded_video_url + (encoded_vtt_url ? ('/subtitle/' + encoded_vtt_url) : '') + '/referer/' + encoded_referer_url
   return webcast_reloaded_url
-}
-
-var get_webcast_reloaded_url_chromecast_sender = function(video_url, vtt_url, referer_url) {
-  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ null, /* force_https= */ null).replace('/index.html', '/chromecast_sender.html')
-}
-
-var get_webcast_reloaded_url_airplay_sender = function(video_url, vtt_url, referer_url) {
-  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/airplay_sender.es5.html')
-}
-
-var get_webcast_reloaded_url_proxy = function(hls_url, vtt_url, referer_url) {
-  return get_webcast_reloaded_url(hls_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/proxy.html')
 }
 
 // ----------------------------------------------------------------------------- URL redirect
@@ -316,6 +238,176 @@ var get_hmac = function(media_detail_url, timestamp) {
   mac.update(msg)
 
   return buf2hex(mac.finalize())
+}
+
+// ----------------------------------------------------------------------------- extract data from Crackle API endpoints
+
+var extract_episodes_from_API_server_response = function(media) {
+  var episodes = []
+  var playlist, item
+
+  if (media.Playlists && Array.isArray(media.Playlists) && media.Playlists.length) {
+    for (var i=0; i < media.Playlists.length; i++) {
+      playlist = media.Playlists[i]
+
+      if ((playlist instanceof Object) && playlist.Items && Array.isArray(playlist.Items) && playlist.Items.length) {
+        for (var i2=0; i2 < playlist.Items.length; i2++) {
+          item = playlist.Items[i2]
+
+          if ((item instanceof Object) && item.MediaInfo && (item.MediaInfo instanceof Object) && item.MediaInfo.Id && item.MediaInfo.Title && item.MediaInfo.IsLive && !item.MediaInfo.IsTrailer) {
+            episodes.push(item.MediaInfo)
+          }
+        }
+      }
+    }
+  }
+
+  return episodes
+}
+
+// -----------------------------------------------------------------------------
+
+var extract_video_from_API_server_response = function(media) {
+  if (!media || !media.MediaURLs || !Array.isArray(media.MediaURLs) || !media.MediaURLs.length) return
+
+  var types, type, obj, video_url, video_type, vtt_url
+
+  var preprocess_video_url = function() {
+    var embedded_advertising_qs_params = /(?:expand|ad|ad\.locationDesc|ad\.bumper|ad\.preroll|extsid|ad\.metr|euid)=[^&]*[&]?/ig
+    video_url = video_url.replace(embedded_advertising_qs_params, '')
+  }
+
+  types = [
+    ['AppleTV.m3u8',   'application/x-mpegurl'],
+    ['Playready_DASH', 'application/dash+xml'],
+    ['Widevine_DASH',  'application/dash+xml']
+  ]
+
+  for (var i=0; !video_url && (i < types.length); i++) {
+    type = types[i]
+
+    for (var i2=0; !video_url && (i2 < media.MediaURLs.length); i2++) {
+      obj = media.MediaURLs[i2]
+
+      if (!video_url && (obj.Type === type[0]) && (obj.Path || obj.DRMPath)) {
+        video_url  = obj.Path || obj.DRMPath
+        video_type = type[1]
+      }
+    }
+  }
+
+  if (!video_url) return
+
+  if (video_url && (video_url[0] === '/'))
+    video_url = 'https:' + video_url
+
+  if (media.ClosedCaptionFiles && Array.isArray(media.ClosedCaptionFiles) && media.ClosedCaptionFiles.length) {
+
+    types = ['VTT', 'SRT']
+
+    for (var i=0; !vtt_url && (i < types.length); i++) {
+      type = types[i]
+
+      for (var i2=0; !vtt_url && (i2 < media.ClosedCaptionFiles.length); i2++) {
+        obj = media.ClosedCaptionFiles[i2]
+
+        if (!vtt_url && (!constants.language_locale || (obj.Locale === constants.language_locale)) && (obj.Type === type) && obj.Path) {
+          vtt_url = obj.Path
+        }
+      }
+    }
+
+    if (vtt_url && (vtt_url[0] === '/'))
+      vtt_url = 'https:' + vtt_url
+  }
+
+  preprocess_video_url()
+
+  return {video_url: video_url, video_type: video_type, vtt_url: vtt_url}
+}
+
+// ============================================================================= SPA
+
+var strings = {
+  "heading_filters":                  "Filter Channels",
+  "label_type":                       "By Type:",
+  "label_category":                   "By Category:",
+  "types": {
+    "shows":                          "Television",
+    "movies":                         "Movies"
+  },
+  "default_type":                     "Show All",
+  "default_category":                 "Show All",
+  "label_name":                       "By Name:",
+  "button_filter":                    "Apply",
+
+  "heading_tools":                    "Tools",
+  "button_expand_all":                "Expand All",
+  "button_collapse_all":              "Collapse All",
+
+  "button_download_episodes":         "List All Episodes",
+  "button_download_video":            "Get Video URL",
+  "button_start_video":               "Start Video",
+
+  "episode_labels": {
+    "title":                          "title:",
+    "summary":                        "summary:",
+    "time_duration":                  "duration:"
+  },
+  "episode_units": {
+    "duration_hour":                  "hour",
+    "duration_hours":                 "hours",
+    "duration_minutes":               "minutes"
+  }
+}
+
+var constants = {
+  "debug":                            false,
+  "title":                            "Crackle: Program Guide",
+  "target_pathname":                  "/tos",
+  "dom_ids": {
+    "div_root":                       "Crackle_EPG",
+    "div_filters":                    "EPG_filters",
+    "div_tools":                      "EPG_tools",
+    "div_data":                       "EPG_data",
+    "select_type":                    "channel_types",
+    "select_category":                "channel_categories",
+    "text_query":                     "channel_search_query"
+  },
+  "dom_classes": {
+    "data_loaded":                    "loaded",
+    "toggle_collapsed":               "collapsible_state_closed",
+    "toggle_expanded":                "collapsible_state_opened",
+    "div_heading":                    "heading",
+    "div_toggle":                     "toggle_collapsible",
+    "div_collapsible":                "collapsible",
+    "div_episodes":                   "episodes",
+    "div_webcast_icons":              "icons-container"
+  },
+  "img_urls": {
+    "icon_expand":                    "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.arrow_drop_down_circle.twotone.png",
+    "icon_collapse":                  "https://github.com/warren-bank/crx-Crackle/raw/webmonkey-userscript/es5/webmonkey-userscript/img/white.expand_less.round.png",
+    "base_webcast_reloaded_icons":    "https://github.com/warren-bank/crx-webcast-reloaded/raw/gh-pages/chrome_extension/2-release/popup/img/"
+  },
+  "base_website_url":                 "https://www.crackle.com/watch/",
+  "country":                          "US",
+  "language_locale":                  "en-US",
+  "epg_data_cache_storage_key":       "epg_data",
+  "epg_data_xhr_page_size":           20
+}
+
+// ----------------------------------------------------------------------------- URL links to tools on Webcast Reloaded website
+
+var get_webcast_reloaded_url_chromecast_sender = function(video_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ null, /* force_https= */ null).replace('/index.html', '/chromecast_sender.html')
+}
+
+var get_webcast_reloaded_url_airplay_sender = function(video_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(video_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/airplay_sender.es5.html')
+}
+
+var get_webcast_reloaded_url_proxy = function(hls_url, vtt_url, referer_url) {
+  return get_webcast_reloaded_url(hls_url, vtt_url, referer_url, /* force_http= */ true, /* force_https= */ false).replace('/index.html', '/proxy.html')
 }
 
 // ----------------------------------------------------------------------------- DOM: static skeleton
@@ -847,60 +939,13 @@ var download_video = function(video_id, block_element, old_button) {
   }
 
   var callback = function(media) {
-    if (!media || !media.MediaURLs || !Array.isArray(media.MediaURLs) || !media.MediaURLs.length) return
+    media = extract_video_from_API_server_response(media)
+    if (!media || (typeof media !== 'object') || !media.video_url) return
 
-    var types, type, obj, video_url, video_type, vtt_url
+    var video_url  = media.video_url
+    var video_type = media.video_type
+    var vtt_url    = media.vtt_url
 
-    var preprocess_video_url = function() {
-      var embedded_advertising_qs_params = /(?:expand|ad|ad\.locationDesc|ad\.bumper|ad\.preroll|extsid|ad\.metr|euid)=[^&]*[&]?/ig
-      video_url = video_url.replace(embedded_advertising_qs_params, '')
-    }
-
-    types = [
-      ['AppleTV.m3u8',   'application/x-mpegurl'],
-      ['Playready_DASH', 'application/dash+xml'],
-      ['Widevine_DASH',  'application/dash+xml']
-    ]
-
-    for (var i=0; !video_url && (i < types.length); i++) {
-      type = types[i]
-
-      for (var i2=0; !video_url && (i2 < media.MediaURLs.length); i2++) {
-        obj = media.MediaURLs[i2]
-
-        if (!video_url && (obj.Type === type[0]) && (obj.Path || obj.DRMPath)) {
-          video_url  = obj.Path || obj.DRMPath
-          video_type = type[1]
-        }
-      }
-    }
-
-    if (!video_url) return
-
-    if (video_url && (video_url[0] === '/'))
-      video_url = 'https:' + video_url
-
-    if (media.ClosedCaptionFiles && Array.isArray(media.ClosedCaptionFiles) && media.ClosedCaptionFiles.length) {
-
-      types = ['VTT', 'SRT']
-
-      for (var i=0; !vtt_url && (i < types.length); i++) {
-        type = types[i]
-
-        for (var i2=0; !vtt_url && (i2 < media.ClosedCaptionFiles.length); i2++) {
-          obj = media.ClosedCaptionFiles[i2]
-
-          if (!vtt_url && (!constants.language_locale || (obj.Locale === constants.language_locale)) && (obj.Type === type) && obj.Path) {
-            vtt_url = obj.Path
-          }
-        }
-      }
-
-      if (vtt_url && (vtt_url[0] === '/'))
-        vtt_url = 'https:' + vtt_url
-    }
-
-    preprocess_video_url()
     insert_webcast_reloaded_div(block_element, video_url, vtt_url)
     add_start_video_button(video_url, video_type, vtt_url, block_element, old_button)
   }
@@ -1029,24 +1074,8 @@ var download_episodes = function(type, show_id, episodes_div, button) {
   }
 
   var callback = function(media) {
-    var episodes = []
-    var playlist, item
-
-    if (media.Playlists && Array.isArray(media.Playlists) && media.Playlists.length) {
-      for (var i=0; i < media.Playlists.length; i++) {
-        playlist = media.Playlists[i]
-
-        if ((playlist instanceof Object) && playlist.Items && Array.isArray(playlist.Items) && playlist.Items.length) {
-          for (var i2=0; i2 < playlist.Items.length; i2++) {
-            item = playlist.Items[i2]
-
-            if ((item instanceof Object) && item.MediaInfo && (item.MediaInfo instanceof Object) && item.MediaInfo.Id && item.MediaInfo.Title && item.MediaInfo.IsLive && !item.MediaInfo.IsTrailer) {
-              episodes.push(item.MediaInfo)
-            }
-          }
-        }
-      }
-    }
+    var episodes = extract_episodes_from_API_server_response(media)
+    if (!episodes || !Array.isArray(episodes) || !episodes.length) return
 
     if ((episodes.length === 1) && (type === 'movies')) {
       var video_id = episodes[0].Id
@@ -1054,7 +1083,7 @@ var download_episodes = function(type, show_id, episodes_div, button) {
       if (video_id)
         download_video(video_id, episodes_div, button)
     }
-    else if (episodes.length) {
+    else {
       display_episodes(episodes, show_id, episodes_div)
     }
   }
@@ -1476,7 +1505,98 @@ var populate_epg_data = function() {
   }
 }
 
-// ----------------------------------------------------------------------------- bootstrap
+// ============================================================================= deep links
+
+var process_episodes_deeplink = function(show_id) {
+  var display_episodes = function(show_id, episodes) {
+    var links = []
+    var episode, title, url, info
+
+    for (var i=0; i < episodes.length; i++) {
+      episode = episodes[i]
+      title = (episode.Season && episode.Episode)
+        ? ('S' + pad_zeros(episode.Season, 2) + 'E' + pad_zeros(episode.Episode, 2) + ' - ' + episode.ShowName + ' - ' + episode.Title)
+        : episode.Title
+
+      url  = 'https://www.crackle.com/watch/' + show_id + '/' + episode.Id
+      info = episode.Description
+
+      links.push({title: title, url: url, info: info})
+    }
+
+    var html = ''
+    html += '<ul>' + "\n"
+    html += links.map(
+        function(link) {
+          var title = link.title
+          var url   = link.url
+          var info  = link.info
+
+          return '  <li><a target="_blank" href="' + url + '" title="' + info.replace(/"/g, '&quot;') + '">' + title + '</a></li>'
+        }
+      ).join("\n")
+    html += "\n" + '</ul>'
+
+    unsafeWindow.document.body.innerHTML = html
+    unsafeWindow.document.body.style.backgroundColor = 'white'
+  }
+
+  var download_episodes = function(show_id) {
+    var url = 'https://web-api-us.crackle.com/Service.svc/channel/' + show_id + '/playlists/all/US'
+
+    var headers = {
+      "Accept": "application/json"
+    }
+
+    var callback = function(media) {
+      var episodes = extract_episodes_from_API_server_response(media)
+      if (!episodes || !Array.isArray(episodes) || !episodes.length) return
+
+      if (episodes.length === 1) {
+        var video_id = episodes[0].Id
+        process_video_deeplink(video_id)
+        return
+      }
+      display_episodes(show_id, episodes)
+    }
+
+    download_json(url, headers, callback)
+  }
+
+  download_episodes(show_id)
+}
+
+// -----------------------------------------------------------------------------
+
+var process_video_deeplink = function(video_id) {
+  if (!user_options.redirect_to_webcast_reloaded)
+    return
+
+  var url = 'https://web-api-us.crackle.com/Service.svc/details/media/' + video_id + '/' + constants.country + '?disableProtocols=true'
+
+  var timestamp = get_timestamp(new Date())
+  var hmac      = get_hmac(url, timestamp)
+
+  var headers = {
+    "Accept"        : "application/json",
+    "Authorization" : [hmac, timestamp, '117', '1'].join('|')
+  }
+
+  var callback = function(media) {
+    media = extract_video_from_API_server_response(media)
+    if (!media || (typeof media !== 'object') || !media.video_url) return
+
+    var video_url  = media.video_url
+    var video_type = media.video_type
+    var vtt_url    = media.vtt_url
+
+    process_video_url(video_url, video_type, vtt_url)
+  }
+
+  download_json(url, headers, callback)
+}
+
+// ============================================================================= bootstrap
 
 var prevent_history_redirects = function() {
   if (unsafeWindow.history) {
@@ -1485,7 +1605,34 @@ var prevent_history_redirects = function() {
   }
 }
 
-var init = function() {
+var init_deeplink = function() {
+  var pathname  = unsafeWindow.location.pathname
+
+  var url_regex = {
+    episodes: new RegExp('^/watch/([\\d]+)$', 'i'),
+    video:    new RegExp('^/watch(?:/playlist)?/[\\d]+/([\\d]+)$', 'i')
+  }
+
+  if (url_regex.episodes.test(pathname)) {
+    debug(5, 'deep link: episodes page (TV series or movie)')
+
+    var show_id = pathname.replace(url_regex.episodes, '$1')
+    process_episodes_deeplink(show_id)
+    return true
+  }
+
+  if (url_regex.video.test(pathname)) {
+    debug(5, 'deep link: video page')
+
+    var video_id = pathname.replace(url_regex.video, '$1')
+    process_video_deeplink(video_id)
+    return true
+  }
+
+  return false
+}
+
+var init_SPA = function() {
   var pathname = unsafeWindow.location.pathname
 
   if (pathname.indexOf(constants.target_pathname) === 0) {
@@ -1497,6 +1644,10 @@ var init = function() {
   else {
     unsafeWindow.location = constants.target_pathname
   }
+}
+
+var init = function() {
+  init_deeplink() || init_SPA()
 }
 
 prevent_history_redirects()
