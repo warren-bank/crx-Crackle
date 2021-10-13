@@ -1,16 +1,25 @@
-#### [Chromium browser extension for _Crackle_](https://github.com/warren-bank/crx-Crackle)
+### [Crackle](https://github.com/warren-bank/crx-Crackle/tree/master)
 
-Rewrite content pages on [_Crackle_ website](https://www.crackle.com/):
+Chromium browser extension for [crackle.com](https://www.crackle.com/)
 
-* pages that play a single video:
-  - transfer HLS video stream to player on [WebCast-Reloaded](https://github.com/warren-bank/crx-webcast-reloaded) [external website](https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html)
-* pages that list episodes in a series:
-  - display a simplified list with explicit links for each episode (to play video in new tab)
+Its purpose is to:
+* on a page for a TV series:
+  - rewrite the page content to only contain a list of links for each episode in the series
+    * titles are descriptive
+    * URLs direct to a page for a video
+* on a page for a video:
+  - redirect the video stream to an external player
 
 #### Credits:
 
-* [_youtube-dl_ Crackle extractor](https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/crackle.py)
+* [_youtube-dl_ extractor for Crackle](https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/crackle.py)
   - provides a methodology to obtain video stream URLs
+
+#### Stale Branch:
+
+* this branch is no-longer maintained
+  - the [`webmonkey-userscript/es6`](https://github.com/warren-bank/crx-Crackle/tree/webmonkey-userscript/es6) branch is an enhanced version of this extension
+  - the [`webmonkey-userscript/es5`](https://github.com/warren-bank/crx-Crackle/tree/webmonkey-userscript/es5) branch maintains feature parity for older browsers (ex: Android 4.x WebView)
 
 #### Legal:
 
