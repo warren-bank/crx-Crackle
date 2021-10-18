@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Crackle
 // @description  Removes clutter to reduce CPU load and improve site usability. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      1.0.0
+// @version      1.0.1
 // @match        *://crackle.com/*
 // @match        *://sonycrackle.com/*
 // @match        *://*.crackle.com/*
@@ -20,14 +20,20 @@
 // ----------------------------------------------------------------------------- constants
 
 const user_options = {
-  "redirect_to_webcast_reloaded": true,
-  "force_http":                   true,
-  "force_https":                  false,
-
-  // 0: silent
-  // 1: more important
-  // 9: less important
-  "debug_verbosity":              0
+  "common": {
+    // 0: silent
+    // 1: more important
+    // 9: less important
+    "debug_verbosity":              0
+  },
+  "webmonkey": {
+    "post_intent_redirect_to_url":  "about:blank"
+  },
+  "greasemonkey": {
+    "redirect_to_webcast_reloaded": true,
+    "force_http":                   true,
+    "force_https":                  false
+  }
 }
 
 // ----------------------------------------------------------------------------- libraries
@@ -60,7 +66,7 @@ const user_options = {
 // ----------------------------------------------------------------------------- debug
 
 const debug = async (level, message) => {
-  if (!user_options.debug_verbosity || (user_options.debug_verbosity < level)) return
+  if (!user_options.common.debug_verbosity || (user_options.common.debug_verbosity < level)) return
 
   if (typeof message === 'function')
     message = await message()
@@ -76,8 +82,8 @@ const debug = async (level, message) => {
 // ----------------------------------------------------------------------------- URL links to tools on Webcast Reloaded website
 
 const get_webcast_reloaded_url = (video_url, vtt_url, referer_url, force_http, force_https) => {
-  force_http  = (typeof force_http  === 'boolean') ? force_http  : user_options.force_http
-  force_https = (typeof force_https === 'boolean') ? force_https : user_options.force_https
+  force_http  = (typeof force_http  === 'boolean') ? force_http  : user_options.greasemonkey.force_http
+  force_https = (typeof force_https === 'boolean') ? force_https : user_options.greasemonkey.force_https
 
   let encoded_video_url, encoded_vtt_url, encoded_referer_url, webcast_reloaded_base, webcast_reloaded_url
 
@@ -108,12 +114,33 @@ const get_webcast_reloaded_url = (video_url, vtt_url, referer_url, force_http, f
 const redirect_to_url = (url) => {
   if (!url) return
 
-  try {
-    unsafeWindow.top.location = url
+  if (typeof GM_loadUrl === 'function') {
+    if (typeof GM_resolveUrl === 'function')
+      url = GM_resolveUrl(url, unsafeWindow.location.href) || url
+
+    GM_loadUrl(url, 'Referer', unsafeWindow.location.href)
   }
-  catch(e) {
-    unsafeWindow.location = url
+  else {
+    try {
+      unsafeWindow.top.location = url
+    }
+    catch(e) {
+      unsafeWindow.window.location = url
+    }
   }
+}
+
+const process_webmonkey_post_intent_redirect_to_url = () => {
+  let url = null
+
+  if (typeof user_options.webmonkey.post_intent_redirect_to_url === 'string')
+    url = user_options.webmonkey.post_intent_redirect_to_url
+
+  if (typeof user_options.webmonkey.post_intent_redirect_to_url === 'function')
+    url = user_options.webmonkey.post_intent_redirect_to_url()
+
+  if (typeof url === 'string')
+    redirect_to_url(url)
 }
 
 const process_video_url = (video_url, video_type, vtt_url, referer_url) => {
@@ -125,9 +152,10 @@ const process_video_url = (video_url, video_type, vtt_url, referer_url) => {
   if (typeof GM_startIntent === 'function') {
     // running in Android-WebMonkey: open Intent chooser
     GM_startIntent(/* action= */ 'android.intent.action.VIEW', /* data= */ video_url, /* type= */ video_type, /* extras: */ 'textUrl', vtt_url, 'referUrl', referer_url)
+    process_webmonkey_post_intent_redirect_to_url()
     return true
   }
-  else if (user_options.redirect_to_webcast_reloaded) {
+  else if (user_options.greasemonkey.redirect_to_webcast_reloaded) {
     // running in standard web browser: redirect URL to top-level tool on Webcast Reloaded website
     redirect_to_url(get_webcast_reloaded_url(video_url, vtt_url, referer_url))
     return true
@@ -256,7 +284,7 @@ const process_series = (series_id) => {
 // ----------------------------------------------------------------------------- process page for video
 
 const process_video = (video_id) => {
-  if (!user_options.redirect_to_webcast_reloaded)
+  if (!user_options.greasemonkey.redirect_to_webcast_reloaded)
     return
 
   const buf2hex = (buffer) => Array.prototype.map.call(new Uint8Array(buffer), x => ('00' + x.toString(16)).slice(-2)).join('').toUpperCase()
